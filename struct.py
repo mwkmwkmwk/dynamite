@@ -260,7 +260,7 @@ disp(0, entry)
 
 # PHASE 3: EXPRESSIFY
 
-DEBUG_STRUCT = False
+DEBUG_STRUCT = True
 
 struct = {}
 
@@ -409,29 +409,6 @@ class StructExprD:
     def exits(self):
         return self._exits
 
-# 2 pure
-class StructExprEE:
-    def __init__(self, expr, exitp, exitn):
-        assert expr.arity() == 2
-        self.expr = expr
-        self.exitp = exitp
-        self.exitn = exitn
-
-    def exits(self):
-        return {self.exitp, self.exitn}
-
-# 1-hpure
-class StructExprDE:
-    def __init__(self, expr, stmt, exit):
-        assert expr.arity() == 2
-        self.expr = expr
-        self.stmt = stmt
-        self.exit = exit
-        self._exits = {exit} | stmt.exits()
-
-    def exits(self):
-        return self._exits
-
 class StructExprDD:
     def __init__(self, expr, stmtp, stmtn, joins):
         assert expr.arity() == 2
@@ -440,36 +417,6 @@ class StructExprDD:
         self.stmtn = stmtn
         self.joins = joins
         self._exits = stmtp.exits() | stmtn.exits()
-        for stmt in self.joins.values():
-            self._exits |= stmt.exits()
-        self._exits -= set(self.joins)
-
-    def exits(self):
-        return self._exits
-
-class StructExprDJ:
-    def __init__(self, expr, stmtp, outn, joins):
-        assert expr.arity() == 2
-        self.expr = expr
-        self.stmtp = stmtp
-        self.outn = outn
-        self.joins = joins
-        self._exits = stmtp.exits()
-        for stmt in self.joins.values():
-            self._exits |= stmt.exits()
-        self._exits -= set(self.joins)
-
-    def exits(self):
-        return self._exits
-
-class StructExprJJ:
-    def __init__(self, expr, outp, outn, joins):
-        assert expr.arity() == 2
-        self.expr = expr
-        self.outp = outp
-        self.outn = outn
-        self.joins = joins
-        self._exits = set()
         for stmt in self.joins.values():
             self._exits |= stmt.exits()
         self._exits -= set(self.joins)
@@ -535,24 +482,16 @@ def sdispe(nest, e):
 def sdisps(nest, s):
     indent = nest * '  '
     if isinstance(s, StructExprZ):
+        print('{}# Z'.format(indent))
         sdispe(nest, s.expr)
     elif isinstance(s, StructExprE):
+        print('{}# E'.format(indent))
         sdispe(nest, s.expr)
         print('{}goto {}'.format(indent, s.exit))
     elif isinstance(s, StructExprD):
+        print('{}# D'.format(indent))
         sdispe(nest, s.expr)
         sdisps(nest, s.stmt)
-    elif isinstance(s, StructExprEE):
-        print('{}if ({}) {{ # EE'.format(indent, s.expr))
-        print('{}  goto {}'.format(indent, s.exitp))
-        print('{}}} else {{'.format(indent))
-        print('{}  goto {}'.format(indent, s.exitn))
-        print('{}}}'.format(indent))
-    elif isinstance(s, StructExprDE):
-        print('{}if ({}) {{ # DE'.format(indent, s.expr))
-        sdisps(nest+1, s.stmt)
-        print('{}}}'.format(indent))
-        print('{}goto {}'.format(indent, s.exit))
     elif isinstance(s, StructExprDD):
         print('{}if ({}) {{ # DD'.format(indent, s.expr))
         sdisps(nest+1, s.stmtp)
@@ -562,23 +501,8 @@ def sdisps(nest, s):
         for k, v in s.joins.items():
             print('{}{}:'.format(indent, k))
             sdisps(nest+1, v)
-    elif isinstance(s, StructExprDJ):
-        print('{}if ({}) {{ # DJ'.format(indent, s.expr))
-        sdisps(nest+1, s.stmtp)
-        print('{}}}'.format(indent))
-        for k, v in s.joins.items():
-            print('{}{}:'.format(indent, k))
-            sdisps(nest+1, v)
-    elif isinstance(s, StructExprJJ):
-        print('{}if ({}) {{ # JJ'.format(indent, s.expr))
-        print('{}  goto {}'.format(indent, s.outp))
-        print('{}}} else {{'.format(indent))
-        print('{}  goto {}'.format(indent, s.outn))
-        print('{}}}'.format(indent))
-        for k, v in s.joins.items():
-            print('{}{}:'.format(indent, k))
-            sdisps(nest+1, v)
     elif isinstance(s, StructReturn):
+        print('{}# R'.format(indent))
         print('{}{}'.format(indent, s.block))
         print('{}return'.format(indent))
     elif isinstance(s, StructSwitch):
@@ -604,6 +528,15 @@ def sdisps(nest, s):
 if DEBUG_STRUCT:
     print('-' * 80)
 
+def is_e(s):
+    return isinstance(s, StructExprE)
+
+def is_ee(s):
+    return isinstance(s, StructExprDD) and is_e(s.stmtp) and is_e(s.stmtn)
+
+def is_de(s):
+    return isinstance(s, StructExprDD) and (is_e(s.stmtp) or is_e(s.stmtn))
+
 def simplify(struct):
     if DEBUG_STRUCT:
         print("STARTING:")
@@ -624,18 +557,6 @@ def simplify(struct):
                 struct = StructExprD(
                     ExprThen(struct.expr, child.expr),
                 child.stmt)
-            elif isinstance(child, StructExprEE):
-                struct = StructExprEE(
-                    ExprThen(struct.expr, child.expr),
-                    child.exitp,
-                    child.exitn
-                )
-            elif isinstance(child, StructExprDE):
-                struct = StructExprDE(
-                    ExprThen(struct.expr, child.expr),
-                    child.stmt,
-                    child.exit
-                )
             elif isinstance(child, StructExprDD):
                 struct = StructExprDD(
                     ExprThen(struct.expr, child.expr),
@@ -643,123 +564,45 @@ def simplify(struct):
                     child.stmtn,
                     child.joins,
                 )
-            elif isinstance(child, StructExprDJ):
-                struct = StructExprDJ(
-                    ExprThen(struct.expr, child.expr),
-                    child.stmtp,
-                    child.outn,
-                    child.joins,
-                )
-            elif isinstance(child, StructExprJJ):
-                struct = StructExprJJ(
-                    ExprThen(struct.expr, child.expr),
-                    child.outp,
-                    child.outn,
-                    child.joins,
-                )
-            else:
-                return struct
-        elif isinstance(struct, StructExprDE):
-            child = struct.stmt
-            if isinstance(child, StructExprZ):
-                struct = StructExprE(
-                    ExprCond(
-                        struct.expr,
-                        child.expr,
-                        ExprVoid()
-                    ),
-                    struct.exit
-                )
-            elif isinstance(child, StructExprE):
-                if child.exit == struct.exit:
-                    struct = StructExprE(
-                        ExprCond(
-                            struct.expr,
-                            child.expr,
-                            ExprVoid()
-                        ),
-                        struct.exit
-                    )
-                else:
-                    struct = StructExprEE(
-                        ExprCond(
-                            struct.expr,
-                            ExprThen(child.expr, ExprConstBool(1)),
-                            ExprConstBool(0)
-                        ),
-                        child.exit,
-                        struct.exit
-                    )
-            elif isinstance(child, StructExprEE):
-                if child.exitp == struct.exit:
-                    struct = StructExprEE(
-                        ExprCond(
-                            struct.expr,
-                            child.expr,
-                            ExprConstBool(1)
-                        ),
-                        child.exitp,
-                        child.exitn
-                    )
-                elif child.exitn == struct.exit:
-                    struct = StructExprEE(
-                        ExprCond(
-                            struct.expr,
-                            child.expr,
-                            ExprConstBool(0)
-                        ),
-                        child.exitp,
-                        child.exitn
-                    )
-                else:
-                    return struct
-            elif isinstance(child, StructExprD):
-                struct = StructExprDE(
-                    ExprCond(
-                        struct.expr,
-                        ExprThen(child.expr, ExprConstBool(1)),
-                        ExprConstBool(0)
-                    ),
-                    child.stmt,
-                    struct.exit
-                )
-            elif isinstance(child, StructExprDE):
-                if child.exit == struct.exit:
-                    struct = StructExprDE(
-                        ExprCond(
-                            struct.expr,
-                            child.expr,
-                            ExprConstBool(0)
-                        ),
-                        child.stmt,
-                        child.exit
-                    )
-                else:
-                    return struct
             else:
                 return struct
         elif isinstance(struct, StructExprDD):
-            if isinstance(struct.stmtp, StructExprD):
+            if (isinstance(struct.stmtp, StructExprE) and
+                struct.stmtp.exit in struct.joins and
+                struct.stmtp.exit not in struct.stmtn.exits() and
+                all(struct.stmtp.exit not in join.exits() for join in struct.joins.values())):
                 struct = StructExprDD(
-                    ExprCond(
-                        struct.expr,
-                        ExprThen(struct.stmtp.expr, ExprConstBool(1)),
-                        ExprConstBool(0)
-                    ),
-                    struct.stmtp.stmt,
+                    struct.expr,
+                    simplify(StructExprD(struct.stmtp.expr, struct.joins[struct.stmtp.exit])),
                     struct.stmtn,
-                    struct.joins
+                    {
+                        k: v
+                        for k, v in struct.joins.items()
+                        if k != struct.stmtp.exit
+                    }
                 )
-            elif isinstance(struct.stmtn, StructExprD):
+            elif (isinstance(struct.stmtn, StructExprE) and
+                struct.stmtn.exit in struct.joins and
+                struct.stmtn.exit not in struct.stmtp.exits() and
+                all(struct.stmtn.exit not in join.exits() for join in struct.joins.values())):
                 struct = StructExprDD(
+                    struct.expr,
+                    struct.stmtp,
+                    simplify(StructExprD(struct.stmtn.expr, struct.joins[struct.stmtn.exit])),
+                    {
+                        k: v
+                        for k, v in struct.joins.items()
+                        if k != struct.stmtn.exit
+                    }
+                )
+            elif isinstance(struct.stmtp, StructExprZ) and isinstance(struct.stmtn, StructExprZ):
+                assert not struct.joins
+                struct = StructExprZ(
                     ExprCond(
                         struct.expr,
-                        ExprConstBool(1),
-                        ExprThen(struct.stmtn.expr, ExprConstBool(0))
+                        struct.stmtp.expr,
+                        struct.stmtn.expr,
                     ),
-                    struct.stmtp,
-                    struct.stmtn.stmt,
-                    struct.joins
                 )
             elif isinstance(struct.stmtp, StructExprZ):
                 assert not struct.joins
@@ -781,248 +624,102 @@ def simplify(struct):
                     ),
                     struct.stmtp
                 )
-            elif isinstance(struct.stmtn, StructExprE) and not struct.joins:
-                struct = StructExprDE(
-                    ExprCond(
-                        struct.expr,
-                        ExprConstBool(1),
-                        ExprThen(struct.stmtn.expr, ExprConstBool(0)),
-                    ),
-                    struct.stmtp,
-                    struct.stmtn.exit
-                )
-            elif isinstance(struct.stmtp, StructExprE) and not struct.joins:
-                struct = StructExprDE(
-                    ExprCond(
-                        struct.expr,
-                        ExprThen(struct.stmtp.expr, ExprConstBool(0)),
-                        ExprConstBool(1)
-                    ),
-                    struct.stmtn,
-                    struct.stmtp.exit
-                )
-            elif isinstance(struct.stmtp, StructExprE) and isinstance(struct.stmtn, StructExprE):
+            elif is_ee(struct):
                 if struct.stmtp.exit != struct.stmtn.exit:
                     return struct
-                assert len(struct.joins) == 1
-                assert struct.stmtp.exit in struct.joins
-                struct = StructExprD(
-                    ExprCond(
-                        struct.expr,
-                        struct.stmtp.expr,
-                        struct.stmtn.expr
-                    ),
-                    struct.joins[struct.stmtp.exit]
-                )
-            elif (isinstance(struct.stmtp, (StructExprE, StructExprEE)) and
-                    isinstance(struct.stmtn, (StructExprE, StructExprEE))):
-                if isinstance(struct.stmtp, StructExprEE):
-                    condp = struct.stmtp.expr
-                    exitp = struct.stmtp.exitp
-                    exitn = struct.stmtp.exitn
-                    if isinstance(struct.stmtn, StructExprE):
-                        if struct.stmtn.exit == exitp:
-                            condn = ExprThen(struct.stmtn.expr, ExprConstBool(1))
-                        elif struct.stmtn.exit == exitn:
-                            condn = ExprThen(struct.stmtn.expr, ExprConstBool(0))
-                        else:
-                            return struct
-                    else:
-                        assert isinstance(struct.stmtn, StructExprEE)
-                        if struct.stmtn.exitp == exitp and struct.stmtn.exitn == exitn:
-                            condn = struct.stmtn.expr
-                        elif struct.stmtn.exitp == exitn and struct.stmtn.exitn == exitp:
-                            condn = ExprNot(struct.stmtn.expr)
-                        else:
-                            return struct
-                else:
-                    assert isinstance(struct.stmtp, StructExprE)
-                    assert isinstance(struct.stmtn, StructExprEE)
-                    exitp = struct.stmtn.exitp
-                    exitn = struct.stmtn.exitn
-                    condn = struct.stmtn.expr
-                    if struct.stmtp.exit == exitp:
-                        condp = ExprThen(struct.stmtp.expr, ExprConstBool(1))
-                    elif struct.stmtp.exit == exitn:
-                        condp = ExprThen(struct.stmtp.expr, ExprConstBool(0))
-                    else:
-                        return struct
-                cond = ExprCond(struct.expr, condp, condn)
-                if not struct.joins:
-                    struct = StructExprEE(cond, exitp, exitn)
-                elif len(struct.joins) == 1:
-                    assert exitp in struct.joins or exitn in struct.joins
-                    if exitn in struct.joins:
-                        exitp, exitn = exitn, exitp
-                        cond = ExprNot(cond)
-                    struct = StructExprDE(cond, struct.joins[exitp], exitn)
-                else:
-                    assert exitp in struct.joins and exitn in struct.joins
-                    struct = StructExprJJ(cond, exitp, exitn, struct.joins)
-            elif isinstance(struct.stmtp, StructExprDE) and isinstance(struct.stmtn, StructExprE):
-                if struct.stmtp.exit != struct.stmtn.exit:
-                    return struct
-                if struct.stmtp.exit in struct.stmtp.stmt.exits():
-                    return struct
-                for x in struct.joins.values():
-                    if struct.stmtp.exit in x.exits():
-                        return struct
-                struct = StructExprDD(
-                    ExprCond(
-                        struct.expr,
-                        struct.stmtp.expr,
-                        ExprThen(struct.stmtn.expr, ExprConstBool(0))
-                    ),
-                    struct.stmtp.stmt,
-                    struct.joins[struct.stmtp.exit],
-                    {
-                        k: v
-                        for k, v in struct.joins.items()
-                        if k != struct.stmtp.exit
-                    }
-                )
-            elif isinstance(struct.stmtp, StructExprE) and isinstance(struct.stmtn, StructExprDE):
-                if struct.stmtp.exit != struct.stmtn.exit:
-                    return struct
-                if struct.stmtn.exit in struct.stmtn.stmt.exits():
-                    return struct
-                for x in struct.joins.values():
-                    if struct.stmtp.exit in x.exits():
-                        return struct
-                struct = StructExprDD(
-                    ExprCond(
-                        struct.expr,
-                        ExprThen(struct.stmtp.expr, ExprConstBool(0)),
-                        struct.stmtn.expr,
-                    ),
-                    struct.stmtn.stmt,
-                    struct.joins[struct.stmtn.exit],
-                    {
-                        k: v
-                        for k, v in struct.joins.items()
-                        if k != struct.stmtp.exit
-                    }
-                )
-            else:
-                return struct
-        elif isinstance(struct, StructExprDJ):
-            if isinstance(struct.stmtp, StructExprE):
-                assert struct.stmtp.exit == struct.outn
-                assert len(struct.joins) == 1
-                assert struct.outn in struct.joins
-                struct = StructExprD(
-                    ExprCond(
-                        struct.expr,
-                        struct.stmtp.expr,
-                        ExprVoid()
-                    ),
-                    struct.joins[struct.outn]
-                )
-            elif isinstance(struct.stmtp, StructExprDE):
-                if struct.stmtp.exit != struct.outn:
-                    return struct
-                if struct.stmtp.exit in struct.stmtp.stmt.exits():
-                    return struct
-                assert struct.outn in struct.joins
-                struct = StructExprDD(
-                    ExprCond(
-                        struct.expr,
-                        struct.stmtp.expr,
-                        ExprConstBool(0)
-                    ),
-                    struct.stmtp.stmt,
-                    struct.joins[struct.outn],
-                    {
-                        k: v
-                        for k, v in struct.joins.items()
-                        if k != struct.outn
-                    }
-                )
-            elif isinstance(struct.stmtp, StructExprEE):
-                outp = struct.stmtp.exitp
-                outn = struct.stmtp.exitn
-                assert struct.outn in {outp, outn}
-                if outp in struct.joins and outn in struct.joins:
-                    struct = StructExprJJ(
+                elif struct.stmtp.exit in struct.joins:
+                    assert len(struct.joins) == 1
+                    struct = StructExprD(
                         ExprCond(
                             struct.expr,
                             struct.stmtp.expr,
-                            ExprConstBool(1 if struct.outn == outp else 0)
+                            struct.stmtn.expr
                         ),
-                        outp,
-                        outn,
-                        struct.joins
+                        struct.joins[struct.stmtp.exit]
                     )
                 else:
-                    assert len(struct.joins) == 1
-                    assert struct.outn in struct.joins
-                    if outn == struct.outn:
-                        struct = StructExprDE(
-                            ExprCond(
-                                struct.expr,
-                                ExprNot(struct.stmtp.expr),
-                                ExprConstBool(1)
-                            ),
-                            struct.joins[outn],
-                            outp
-                        )
-                    else:
-                        struct = StructExprDE(
-                            ExprCond(
-                                struct.expr,
-                                struct.stmtp.expr,
-                                ExprConstBool(0)
-                            ),
-                            struct.joins[outp],
-                            outn
-                        )
-            else:
-                return struct
-        elif isinstance(struct, StructExprJJ):
-            stmtp = struct.joins[struct.outp]
-            stmtn = struct.joins[struct.outn]
-            other_exits = {
-                exit
-                for k, v in struct.joins.items()
-                if k not in {struct.outp, struct.outn}
-                for exit in v.exits()
-            }
-            if {struct.outp, struct.outn} & other_exits:
-                return struct
-            p2n = struct.outn in stmtp.exits()
-            n2p = struct.outp in stmtn.exits()
-            if not p2n and not n2p:
+                    assert not struct.joins
+                    struct = StructExprE(
+                        ExprCond(
+                            struct.expr,
+                            stmtp.expr,
+                            stmtn.expr,
+                        ),
+                        stmtp.exit
+                    )
+            elif (is_e(struct.stmtp) and is_de(struct.stmtn)) or (is_de(struct.stmtp) and is_e(struct.stmtn)):
+                if is_e(struct.stmtp):
+                    e = struct.stmtp
+                    de = struct.stmtn
+                    neg = True
+                else:
+                    e = struct.stmtn
+                    de = struct.stmtp
+                    neg = False
+                assert is_de(de)
+                assert is_e(e)
+                if is_e(de.stmtp):
+                    if de.stmtp.exit != e.exit:
+                        return struct
+                    assert not de.joins
+                    cond_de = ExprCond(de.expr, ExprThen(de.stmtp.expr, ExprConstBool(1)), ExprConstBool(0))
+                    cond_e = ExprThen(e.expr, ExprConstBool(1))
+                    stmtp = StructExprE(ExprVoid(), e.exit)
+                    stmtn = de.stmtn
+                else:
+                    assert is_e(de.stmtn)
+                    if de.stmtn.exit != e.exit:
+                        return struct
+                    assert not de.joins
+                    cond_de = ExprCond(de.expr, ExprConstBool(1), ExprThen(de.stmtp.expr, ExprConstBool(0)))
+                    cond_e = ExprThen(e.expr, ExprConstBool(0))
+                    stmtp = de.stmtp
+                    stmtn = StructExprE(ExprVoid(), e.exit)
+                if neg:
+                    cond = ExprCond(
+                        struct.expr,
+                        cond_e,
+                        cond_de,
+                    )
+                else:
+                    cond = ExprCond(
+                        struct.expr,
+                        cond_de,
+                        cond_e,
+                    )
                 struct = StructExprDD(
-                    struct.expr,
+                    cond,
                     stmtp,
                     stmtn,
-                    {
-                        k: v
-                        for k, v in struct.joins.items()
-                        if k not in {struct.outp, struct.outn}
-                    }
+                    struct.joins
                 )
-            elif not n2p:
-                struct = StructExprDJ(
-                    struct.expr,
-                    stmtp,
-                    struct.outn,
-                    {
-                        k: v
-                        for k, v in struct.joins.items()
-                        if k != struct.outp
-                    }
+            elif is_ee(struct.stmtp) and is_ee(struct.stmtn):
+                condp = ExprCond(
+                    struct.stmtp.expr,
+                    ExprThen(struct.stmtp.stmtp.expr, ExprConstBool(1)),
+                    ExprThen(struct.stmtp.stmtn.expr, ExprConstBool(0)),
                 )
-            elif not p2n:
-                struct = StructExprDJ(
-                    ExprNot(struct.expr),
-                    stmtn,
-                    struct.outp,
-                    {
-                        k: v
-                        for k, v in struct.joins.items()
-                        if k != struct.outn
-                    }
+                exitp = struct.stmtp.stmtp.exit
+                exitn = struct.stmtp.stmtn.exit
+                if struct.stmtn.stmtp.exit == exitp and struct.stmtn.stmtn.exit == exitn:
+                    condn = ExprCond(
+                        struct.stmtn.expr,
+                        ExprThen(struct.stmtn.stmtp.expr, ExprConstBool(1)),
+                        ExprThen(struct.stmtn.stmtn.expr, ExprConstBool(0)),
+                    )
+                elif struct.stmtn.stmtp.exit == exitn and struct.stmtn.stmtn.exit == exitp:
+                    condn = ExprCond(
+                        struct.stmtn.expr,
+                        ExprThen(struct.stmtn.stmtp.expr, ExprConstBool(0)),
+                        ExprThen(struct.stmtn.stmtn.expr, ExprConstBool(1)),
+                    )
+                else:
+                    return struct
+                struct = StructExprDD(
+                    ExprCond(struct.expr, condp, condn),
+                    StructExprE(ExprVoid(), exitp),
+                    StructExprE(ExprVoid(), exitn),
+                    struct.joins
                 )
             else:
                 return struct
@@ -1062,13 +759,13 @@ def structify(block):
             },
         )
     else:
-        res = StructExprJJ(
+        res = StructExprDD(
             ExprLeafTwo(block, mah_block.cond),
-            mah_block.outp,
-            mah_block.outn,
+            struct[mah_block.outp],
+            struct[mah_block.outn],
             {
                 x: struct[x]
-                for x in rdom[block]
+                for x in rdom[block] - {mah_block.outp, mah_block.outn}
             },
         )
     res = simplify(res)
