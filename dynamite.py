@@ -320,18 +320,15 @@ class ExprLeafOne:
         return self.block
 
 
-class ExprLeafTwo:
-    def __init__(self, block, cond):
-        self.block = block
+class ExprLeafCond:
+    def __init__(self, cond):
         self.cond = cond
 
     def arity(self):
         return 2
 
     def __str__(self):
-        if '-' in self.block:
-            return self.cond
-        return '{}, {}'.format(self.block, self.cond)
+        return self.cond
 
 
 class ExprConstBool:
@@ -347,6 +344,8 @@ class ExprConstBool:
 
 class ExprCond:
     def __new__(cls, exprc, exprp, exprn):
+        if isinstance(exprc, ExprThen):
+            return ExprThen(exprc.expra, ExprCond(exprc.exprb, exprp, exprn))
         if isinstance(exprp, ExprConstBool) and isinstance(exprn, ExprConstBool):
             if exprp.which == 1 and exprn.which == 0:
                 return exprc
@@ -377,9 +376,15 @@ class ExprCond:
 
 
 class ExprNot:
-    def __init__(self, expr):
-        self.expr = expr
+    def __new__(cls, expr):
         assert expr.arity() == 2
+        if isinstance(expr, ExprThen):
+            return ExprThen(expr.expra, ExprNot(expr.exprb))
+        if isinstance(expr, ExprCond):
+            return ExprCond(expr.exprc, ExprNot(expr.expra), ExprNot(expr.exprb))
+        self = super().__new__(cls)
+        self.expr = expr
+        return self
 
     def arity(self):
         return 2
@@ -492,8 +497,8 @@ def sdispe(nest, e):
             sdispe(nest+1, e.exprn)
         print('{}}}'.format(indent))
     else:
-        # XXX
         print('{}{} # {}'.format(indent, e, type(e)))
+        assert 0
 
 def sdisps(nest, s):
     indent = nest * '  '
@@ -509,7 +514,11 @@ def sdisps(nest, s):
         sdispe(nest, s.expr)
         sdisps(nest, s.stmt)
     elif isinstance(s, StructExprDD):
-        print('{}if ({}) {{ // DD'.format(indent, s.expr))
+        cond = s.expr
+        while isinstance(cond, ExprThen):
+            sdispe(nest, cond.expra)
+            cond = cond.exprb
+        print('{}if ({}) {{ // DD'.format(indent, cond))
         sdisps(nest+1, s.stmtp)
         print('{}}} else {{'.format(indent))
         sdisps(nest+1, s.stmtn)
@@ -776,7 +785,7 @@ def structify(block):
         )
     else:
         res = StructExprDD(
-            ExprLeafTwo(block, mah_block.cond),
+            ExprThen(ExprLeafOne(block), ExprLeafCond(mah_block.cond)),
             struct[mah_block.outp],
             struct[mah_block.outn],
             {
@@ -872,12 +881,16 @@ def fdisp(nest, stmts):
             else:
                 print('{}continue {}'.format(indent, s.loop))
         elif isinstance(s, FinalIf):
+            cond = s.expr
+            while isinstance(cond, ExprThen):
+                sdispe(nest, cond.expra)
+                cond = cond.exprb
             if not s.stmtp:
-                print('{}if ({}) {{'.format(indent, ExprNot(s.expr)))
+                print('{}if ({}) {{'.format(indent, ExprNot(cond)))
                 fdisp(nest+1, s.stmtn)
                 print('{}}}'.format(indent))
             else:
-                print('{}if ({}) {{'.format(indent, s.expr))
+                print('{}if ({}) {{'.format(indent, cond))
                 fdisp(nest+1, s.stmtp)
                 if s.stmtn:
                     print('{}}} else {{'.format(indent))
