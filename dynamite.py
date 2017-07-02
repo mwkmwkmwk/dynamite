@@ -1,6 +1,21 @@
 #!/usr/bin/env python3
 
-import sys
+# And we all
+# Die, die, die tonight
+# Sanctified with dynamite
+# Die, die, dynamite
+# Halleluja!
+
+import argparse
+
+parser = argparse.ArgumentParser(description='Structuralize a list of basic blocks.', conflict_handler='resolve')
+parser.add_argument('file', help='the input file')
+parser.add_argument('-d', '--print-domtree', action='store_true', help='print the dominator tree')
+parser.add_argument('-D', '--debug-domtree', action='store_true', help='debug the dominator tree construction phase')
+parser.add_argument('-h', '--print-halfstruct', action='store_true', help='print the half-structures')
+parser.add_argument('-H', '--debug-halfstruct', action='store_true', help='debug the half-structuralization phase')
+parser.add_argument('-F', '--debug-final', action='store_true', help='debug the final phase')
+args = parser.parse_args()
 
 class Block:
     pass
@@ -92,13 +107,15 @@ class ReturnBlock:
 blocks = {}
 entry = None
 
-with open(sys.argv[1]) as f:
+with open(args.file) as f:
     for l in f:
         l, _, _ = l.partition('#')
         p = l.split()
         if not p:
             continue
         b = p[0]
+        if '->' in b:
+            raise ValueError("Block name must not contain ->")
         if b in blocks:
             raise ValueError("Duplicate block {}".format(b))
         if entry is None:
@@ -136,8 +153,6 @@ with open(sys.argv[1]) as f:
 
 # PHASE 2: DOMTREE, CRIT EDGE SPLIT
 
-DEBUG_DOMTREE = False
-
 queue = [(None, entry)]
 dom = {}
 rdom = {None: set()}
@@ -170,9 +185,11 @@ def lca(a, b):
             return a
 
 while queue:
+    if args.debug_domtree:
+        print('-' * 10 + ' DOMTREE ITERATION ' + '-' * 10)
     cur_from, cur_to = queue.pop()
     if cur_to not in dom:
-        if DEBUG_DOMTREE:
+        if args.debug_domtree:
             print('NEW', cur_from, cur_to)
         dom[cur_to] = cur_from
         exits[cur_to] = {}
@@ -181,11 +198,11 @@ while queue:
         if cur_to not in blocks:
             raise ValueError("Unknown block {}".format(cur_to))
         for out in blocks[cur_to].outs():
-            if DEBUG_DOMTREE:
+            if args.debug_domtree:
                 print('QUEUE', cur_to, out)
             queue.append((cur_to, out))
     else:
-        if DEBUG_DOMTREE:
+        if args.debug_domtree:
             print('CONSIDER', dom[cur_to], cur_from, cur_to, cur_to in multiin)
         if cur_to not in multiin:
             if dom[cur_to] is None:
@@ -202,7 +219,7 @@ while queue:
             else:
                 parent = blocks[dom[cur_to]]
                 if not isinstance(parent, UncondBlock):
-                    if DEBUG_DOMTREE:
+                    if args.debug_domtree:
                         print('POSTSPLIT', cur_from, dom[cur_to], cur_to)
                     transit = dom[cur_to] + '->' + cur_to
                     blocks[transit] = UncondBlock(cur_to)
@@ -215,7 +232,7 @@ while queue:
                     dom[cur_to] = transit
             multiin.add(cur_to)
         if cur_from is not None and cur_to in blocks[cur_from].outs() and not isinstance(blocks[cur_from], UncondBlock):
-            if DEBUG_DOMTREE:
+            if args.debug_domtree:
                 print('PRESPLIT', dom[cur_to], cur_from, cur_to)
             transit = cur_from + '->' + cur_to
             blocks[transit] = UncondBlock(cur_to)
@@ -244,23 +261,22 @@ while queue:
             dom[cur_to] = new_dom
             rdom[new_dom].add(cur_to)
             for x in exits[cur_to]:
-                if DEBUG_DOMTREE:
+                if args.debug_domtree:
                     print('REQUEUE', cur_to, x)
                 queue.append((cur_to, x))
         orig_from = cur_from
         while cur_from != new_dom:
             exits[cur_from][cur_to] = orig_from
             cur_from = dom[cur_from]
-    if DEBUG_DOMTREE:
+    if args.debug_domtree:
         disp(0, entry)
         print('INFLIGHT', queue)
-        print('-' * 60)
 
-disp(0, entry)
+if args.print_domtree or args.debug_domtree:
+    print('-' * 20 + ' DOMINATOR TREE ' + '-' * 20)
+    disp(0, entry)
 
-# PHASE 3: EXPRESSIFY
-
-DEBUG_STRUCT = True
+# PHASE 3: HALF-STRUCTURALIZE
 
 struct = {}
 
@@ -482,18 +498,18 @@ def sdispe(nest, e):
 def sdisps(nest, s):
     indent = nest * '  '
     if isinstance(s, StructExprZ):
-        print('{}# Z'.format(indent))
+        print('{}// Z'.format(indent))
         sdispe(nest, s.expr)
     elif isinstance(s, StructExprE):
-        print('{}# E'.format(indent))
+        print('{}// E'.format(indent))
         sdispe(nest, s.expr)
         print('{}goto {}'.format(indent, s.exit))
     elif isinstance(s, StructExprD):
-        print('{}# D'.format(indent))
+        print('{}// D'.format(indent))
         sdispe(nest, s.expr)
         sdisps(nest, s.stmt)
     elif isinstance(s, StructExprDD):
-        print('{}if ({}) {{ # DD'.format(indent, s.expr))
+        print('{}if ({}) {{ // DD'.format(indent, s.expr))
         sdisps(nest+1, s.stmtp)
         print('{}}} else {{'.format(indent))
         sdisps(nest+1, s.stmtn)
@@ -502,7 +518,7 @@ def sdisps(nest, s):
             print('{}{}:'.format(indent, k))
             sdisps(nest+1, v)
     elif isinstance(s, StructReturn):
-        print('{}# R'.format(indent))
+        print('{}// R'.format(indent))
         print('{}{}'.format(indent, s.block))
         print('{}return'.format(indent))
     elif isinstance(s, StructSwitch):
@@ -525,8 +541,8 @@ def sdisps(nest, s):
         print('{}{}'.format(indent, type(s)))
         assert 0
 
-if DEBUG_STRUCT:
-    print('-' * 80)
+if args.debug_halfstruct:
+    print('-' * 10 + ' START HALF-STRUCTURALIZATION ' + '-' * 10)
 
 def is_e(s):
     return isinstance(s, StructExprE)
@@ -538,7 +554,7 @@ def is_de(s):
     return isinstance(s, StructExprDD) and (is_e(s.stmtp) or is_e(s.stmtn))
 
 def simplify(struct):
-    if DEBUG_STRUCT:
+    if args.debug_halfstruct:
         print("STARTING:")
         sdisps(1, struct)
     while True:
@@ -725,7 +741,7 @@ def simplify(struct):
                 return struct
         else:
             return struct
-        if DEBUG_STRUCT:
+        if args.debug_halfstruct:
             print(" SIMPLIFIED:")
             sdisps(1, struct)
 
@@ -775,11 +791,9 @@ def structify(block):
 
 structify(entry)
 
-print('-' * 80)
-
-sdisps(0, struct[entry])
-
-print('-' * 80)
+if args.print_halfstruct or args.debug_halfstruct:
+    print('-' * 20 + ' FINAL HALF-STRUCTURE ' + '-' * 20)
+    sdisps(0, struct[entry])
 
 # PHASE 4: JOIN CALC
 
@@ -850,9 +864,14 @@ def jdisp(nest, block):
     for c in rdom[block]:
         jdisp(nest+1, c)
 
-jdisp(0, entry)
+if args.debug_final:
+    print('-' * 60)
+    jdisp(0, entry)
 
 # PHASE 5: DISPLAY
+
+if args.debug_domtree or args.print_domtree or args.debug_halfstruct or args.print_halfstruct or args.debug_final:
+    print('-' * 30 + ' FINAL RESULT ' + '-' * 30)
 
 def doit(nest, block):
     indent = nest * '  '
