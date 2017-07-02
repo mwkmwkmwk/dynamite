@@ -52,6 +52,7 @@ Ideas for later:
 
 - improve loop break selection heuristics:
 
+  - make it deterministic
   - like above, try to maximize break weight, all else being equal
   - if settling for a break at an exit, make sure it's actually used more
     than once
@@ -62,6 +63,8 @@ Ideas for later:
     (need to partially reverse half-structuralization for these?)
 
 - try detecting glued loop heads?
+- if a return block contains no interesting instructions and has incoming
+  gotos, just change them to a "return"
 - convert if trees to switches [requires a better input format]
 - maybe convert switches to ifs/subswitches when common exits are involved, eg.
 
