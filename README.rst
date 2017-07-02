@@ -58,5 +58,5 @@ line describes the entry block.  The following kinds of basic blocks exist:
   ``<expr>`` is the expression to be looked up in the table (any string without
   spaces), ``<valueX>`` are values to be matched (again, any string without spaces),
   and ``<exitX>`` are corresponding basic blocks.  ``<exit-default>``, if present,
-  if the basic block to be executed if none of the values matched (if not present,
+  is the basic block to be executed if none of the values matched (if not present,
   we assume we have no idea what will happen for values not present in the table).
