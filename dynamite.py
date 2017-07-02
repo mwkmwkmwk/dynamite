@@ -687,7 +687,7 @@ def simplify(struct):
                     if de.stmtn.exit != e.exit:
                         return struct
                     assert not de.joins
-                    cond_de = ExprCond(de.expr, ExprConstBool(1), ExprThen(de.stmtp.expr, ExprConstBool(0)))
+                    cond_de = ExprCond(de.expr, ExprConstBool(1), ExprThen(de.stmtn.expr, ExprConstBool(0)))
                     cond_e = ExprThen(e.expr, ExprConstBool(0))
                     stmtp = de.stmtp
                     stmtn = StructExprE(ExprVoid(), e.exit)
@@ -795,191 +795,375 @@ if args.print_halfstruct or args.debug_halfstruct:
     print('-' * 20 + ' FINAL HALF-STRUCTURE ' + '-' * 20)
     sdisps(0, struct[entry])
 
-# PHASE 4: JOIN CALC
+# PHASE 4: FINAL STRUCTURALIZATION
 
-block_hardafter = {}
-block_after = {}
-block_join = {}
-loop_join = {}
-weight = {}
+class FinalExpr:
+    def __init__(self, expr):
+        self.expr = expr
 
-def calc_weight(block):
-    res = 1
-    for x in rdom[block]:
-        res += calc_weight(x)
-    weight[block] = res
-    return res
+class FinalGoto:
+    def __init__(self, exit):
+        self.exit = exit
 
-calc_weight(entry)
+class FinalBreak:
+    def __init__(self, loop):
+        self.loop = loop
 
+class FinalContinue:
+    def __init__(self, loop):
+        self.loop = loop
 
-def join(block, mah_after, mah_hard):
-    if block in exits[block]:
-        # XXX loop
-        pass
-    block_after[block] = mah_after
-    block_hardafter[block] = mah_hard
-    local_candidates = []
-    for x in rdom[block]:
-        if not (set(exits[x]) & rdom[block]):
-            li = 0
-            for y in rdom[block]:
-                if x in exits[y]:
-                    li += 1
-            local_candidates.append((li, weight[x], x))
-    best_local = max(local_candidates) if local_candidates else None
-    mah_join = None
-    if mah_after is None or mah_after not in exits[block] or (not mah_hard and local_candidates and best_local[1] > 1):
-        if local_candidates:
-            mah_join = best_local[2]
-    elif mah_hard:
-        if exits[block][mah_after] != block:
-            mah_join = exits[block][mah_after]
-            while dom[mah_join] != block:
-                mah_join = dom[mah_join]
-    block_join[block] = mah_join
-    for x in rdom[block]:
-        if x == mah_join or mah_join is None:
-            join(x, mah_after, mah_hard)
-        else:
-            join(x, mah_join, True)
+class FinalIf:
+    def __init__(self, expr, stmtp, stmtn):
+        self.expr = expr
+        self.stmtp = stmtp
+        self.stmtn = stmtn
 
+class FinalLabel:
+    def __init__(self, label):
+        self.label = label
 
-join(entry, None, False)
+class FinalCase:
+    def __init__(self, value):
+        self.value = value
 
-def jdisp(nest, block):
+class FinalDefault:
+    pass
+
+class FinalSwitch:
+    def __init__(self, label, expr, stmt):
+        self.label = label
+        self.expr = expr
+        self.stmt = stmt
+
+class FinalWhile:
+    def __init__(self, label, expr, stmt, else_):
+        self.label = label
+        self.expr = expr
+        self.stmt = stmt
+        self.else_ = else_
+
+def fdisp(nest, stmts):
     indent = nest * '  '
-    infos = [
-        '{}{} {}'.format(indent, block, blocks[block])
-    ]
-    if exits[block]:
-        infos.append('EXITS: {}'.format(', '.join('{}[{}]'.format(k, v) if v != block else k for k, v in exits[block].items())))
-    if block_after[block] is not None:
-        infos.append('AFTER: {} {}'.format(block_after[block], block_hardafter[block]))
-    if block_join[block] is not None:
-        infos.append('JOIN {}'.format(block_join[block]))
-    if block in exits[block]:
-        infos.append('LOOP HEAD')
-    print('; '.join(infos))
-    for c in rdom[block]:
-        jdisp(nest+1, c)
+    for s in stmts:
+        if isinstance(s, StructExprZ):
+            if args.debug_final:
+                print('{}// Z'.format(indent))
+            sdispe(nest, s.expr)
+        elif isinstance(s, StructReturn):
+            if args.debug_final:
+                print('{}// R'.format(indent))
+            print('{}{}'.format(indent, s.block))
+            print('{}return'.format(indent))
+        elif isinstance(s, FinalExpr):
+            if args.debug_final:
+                print('{}// E'.format(indent))
+            sdispe(nest, s.expr)
+        elif isinstance(s, FinalGoto):
+            print('{}goto {}'.format(indent, s.exit))
+        elif isinstance(s, FinalBreak):
+            if s.loop is None:
+                print('{}break'.format(indent))
+            else:
+                print('{}break {}'.format(indent, s.loop))
+        elif isinstance(s, FinalContinue):
+            if s.loop is None:
+                print('{}continue'.format(indent))
+            else:
+                print('{}continue {}'.format(indent, s.loop))
+        elif isinstance(s, FinalIf):
+            if not s.stmtp:
+                print('{}if ({}) {{'.format(indent, ExprNot(s.expr)))
+                fdisp(nest+1, s.stmtn)
+                print('{}}}'.format(indent))
+            else:
+                print('{}if ({}) {{'.format(indent, s.expr))
+                fdisp(nest+1, s.stmtp)
+                if s.stmtn:
+                    print('{}}} else {{'.format(indent))
+                    fdisp(nest+1, s.stmtn)
+                print('{}}}'.format(indent))
+        elif isinstance(s, FinalLabel):
+            if s.label in used_labels:
+                print('{}{}:'.format(indent[:-2], s.label))
+        elif isinstance(s, FinalCase):
+            print('{}case {}:'.format(indent[:-2], s.value))
+        elif isinstance(s, FinalDefault):
+            print('{}default:'.format(indent[:-2]))
+        elif isinstance(s, FinalSwitch):
+            if s.label in used_loops:
+                print('{}{}: switch ({}) {{'.format(s.label, indent, s.expr))
+            else:
+                print('{}switch ({}) {{'.format(indent, s.expr))
+            fdisp(nest+1, s.stmt)
+            print('{}}}'.format(indent))
+        elif isinstance(s, FinalWhile):
+            if s.label in used_loops:
+                print('{}{}: while ({}) {{'.format(s.label, indent, s.expr))
+            else:
+                print('{}while ({}) {{'.format(indent, s.expr))
+            fdisp(nest+1, s.stmt)
+            if s.else_:
+                print('{}}} else {{{}'.format(indent))
+                fdisp(nest+1, s.else_)
+            print('{}}}'.format(indent))
+        else:
+            print('{}{}'.format(indent, type(s)))
+            assert 0
 
-if args.debug_final:
-    print('-' * 60)
-    jdisp(0, entry)
+used_labels = set()
+used_loops = set()
 
-# PHASE 5: DISPLAY
+def toposort(joins, after):
+    res = []
+    done = set()
+    def go(x):
+        if x in done:
+            return
+        done.add(x)
+        for y in joins[x].exits():
+            if y in joins:
+                go(y)
+        res.append(x)
+    for x in joins:
+        if after in joins[x].exits():
+            go(x)
+    for x in joins:
+        go(x)
+    return res[::-1]
+
+BREAK_JOIN = 0
+BREAK_AFTER = 1
+BREAK_MULTI = 2
+BREAK_EXIT = 3
+BREAK_MEH = 4
+
+def find_breaks(struct, level, top_exits, after, multis):
+    if isinstance(struct, StructExprD):
+        return find_breaks(struct.stmt, level, top_exits, after, multis)
+    elif isinstance(struct, StructLoop):
+        return find_breaks(struct.stmt, level, top_exits, after, multis)
+    elif isinstance(struct, StructExprDD):
+        res = []
+        for x in struct.joins.values():
+            if x.exits() <= top_exits:
+                res.append((BREAK_JOIN, level, x))
+            else:
+                res += find_breaks(x, level+1, top_exits, after, multis)
+        for x in [struct.stmtp, struct.stmtn]:
+            if x.exits() <= top_exits:
+                if after in x.exits():
+                    kind = BREAK_AFTER
+                elif multis & x.exits():
+                    kind = BREAK_MULTI
+                elif x.exits():
+                    kind = BREAK_EXIT
+                else:
+                    kind = BREAK_MEH
+                res.append((kind, level, x))
+            else:
+                res += find_breaks(x, level+1, top_exits, after, multis)
+        return res
+    elif isinstance(struct, StructSwitch):
+        # XXX
+        return []
+    else:
+        return []
+
+def replace_break(struct, break_stmt, break_label):
+    if struct is break_stmt:
+        return StructExprE(ExprVoid(), break_label)
+    elif isinstance(struct, StructExprD):
+        return StructExprD(
+            struct.expr,
+            replace_break(struct.stmt, break_stmt, break_label)
+        )
+    elif isinstance(struct, StructLoop):
+        return StructLoop(
+            struct.block,
+            replace_break(struct.stmt, break_stmt, break_label)
+        )
+    elif isinstance(struct, StructExprDD):
+        return StructExprDD(
+            struct.expr,
+            replace_break(struct.stmtp, break_stmt, break_label),
+            replace_break(struct.stmtn, break_stmt, break_label),
+            {
+                k: replace_break(v, break_stmt, break_label)
+                for k, v in struct.joins.items()
+            }
+        )
+    elif isinstance(struct, StructSwitch):
+        # XXX
+        return struct
+    else:
+        return struct
+
+def final_expr(expr):
+    if isinstance(expr, ExprVoid):
+        return []
+    else:
+        return [FinalExpr(expr)]
+
+def finalize(struct, after, labels, cur_break, cur_cont):
+    if isinstance(struct, StructExprZ):
+        return [struct]
+    elif isinstance(struct, StructReturn):
+        return [struct]
+    elif isinstance(struct, StructExprD):
+        return (final_expr(struct.expr) +
+            finalize(struct.stmt, after, labels, cur_break, cur_cont))
+    elif isinstance(struct, StructExprE):
+        if after == struct.exit:
+            return final_expr(struct.expr)
+        else:
+            if struct.exit == cur_break:
+                goto = FinalBreak(None)
+            elif struct.exit == cur_cont:
+                goto = FinalContinue(None)
+            elif struct.exit in labels:
+                cls, loop = labels[struct.exit]
+                used_loops.add(loop)
+                goto = cls(loop)
+            else:
+                used_labels.add(struct.exit)
+                goto = FinalGoto(struct.exit)
+            return final_expr(struct.expr) + [goto]
+    elif isinstance(struct, StructExprDD):
+        joins = toposort(struct.joins, after)
+        joins.append(after)
+        stmtp = finalize(struct.stmtp, joins[0], labels, cur_break, cur_cont)
+        stmtn = finalize(struct.stmtn, joins[0], labels, cur_break, cur_cont)
+        res = [FinalIf(struct.expr, stmtp, stmtn)]
+        for idx in range(len(joins)-1):
+            res.append(FinalLabel(joins[idx]))
+            stmt = struct.joins[joins[idx]]
+            res += finalize(stmt, joins[idx+1], labels, cur_break, cur_cont)
+        return res
+    elif isinstance(struct, StructSwitch):
+        joins = toposort(struct.joins, after)
+        if args.debug_final:
+            print(struct.block, joins)
+        rev = {}
+        for c in struct.cases:
+            if c.out not in rev:
+                rev[c.out] = []
+            rev[c.out].append(c.value)
+        if struct.outd is not None:
+            if struct.outd not in rev:
+                rev[struct.outd] = []
+            rev[struct.outd].append(None)
+        stmts = []
+        bad = False
+        for x in struct.joins[joins[-1]].exits():
+            if x in struct.joins:
+                bad = True
+        ctr = 0
+        for x in struct.joins.values():
+            if joins[-1] in x.exits():
+                ctr += 1
+        if bad or ctr < 2:
+            joins.append(after)
+        mah_break = joins[-1]
+        nest_labels = dict(labels)
+        mah_label = struct.block + '.switch'
+        nest_labels[mah_break] = FinalBreak, mah_label
+        for idx in range(len(joins)-1):
+            if joins[idx] in rev:
+                for y in rev[joins[idx]]:
+                    if y is None:
+                        stmts.append(FinalDefault())
+                    else:
+                        stmts.append(FinalCase(y))
+            stmts.append(FinalLabel(joins[idx]))
+            stmt = struct.joins[joins[idx]]
+            stmts += finalize(stmt, joins[idx+1], nest_labels, mah_break, cur_cont)
+        if joins[-1] in rev:
+            for y in rev[joins[-1]]:
+                if y is None:
+                    stmts.append(FinalDefault())
+                else:
+                    stmts.append(FinalCase(y))
+        res = [
+            FinalExpr(ExprLeafOne(struct.block)),
+            FinalSwitch(mah_label, struct.expr, stmts),
+        ]
+        if mah_break != after:
+            res.append(FinalLabel(mah_break))
+            stmt = struct.joins[mah_break]
+            res += finalize(stmt, after, labels, cur_break, cur_cont)
+        return res
+    elif isinstance(struct, StructLoop):
+        cand_breaks = find_breaks(struct.stmt, 0, struct.exits(), after, set(labels))
+        mah_break = None
+        break_final = []
+        mah_stmt = struct.stmt
+        mah_label = struct.block + '.loop'
+        if args.debug_final:
+            print(struct.block, cand_breaks)
+        if cand_breaks:
+            break_kind = min(x[0] for x in cand_breaks)
+            break_stmt = None
+            if break_kind == BREAK_JOIN:
+                lvl = min(x[1] for x in cand_breaks if x[0] == BREAK_JOIN)
+                break_stmt = [x[2] for x in cand_breaks if x[0] == BREAK_JOIN and x[1] == lvl][0]
+            else:
+                cand_breaks = [x[2] for x in cand_breaks if x[0] == break_kind]
+                if len(cand_breaks) == 1 or break_kind == BREAK_MEH:
+                    break_stmt = cand_breaks[0]
+                elif break_kind == BREAK_AFTER:
+                    mah_break = after
+                elif break_kind == BREAK_MULTI:
+                    exits = set(labels) & card_breaks[0].exits()
+                    mah_break = list(exits)[0]
+                elif break_kind == BREAK_EXIT:
+                    exits = card_breaks[0].exits()
+                    mah_break = list(exits)[0]
+                else:
+                    assert 0
+            if break_stmt is None:
+                if args.debug_final:
+                    print('BREAK EXIT', struct.block, mah_break)
+                break_final = finalize(StructExprE(ExprVoid(), mah_break), after, labels, cur_break, cur_cont)
+            else:
+                # ugh.
+                if args.debug_final:
+                    print('BREAK H4X', struct.block, break_stmt)
+                mah_break = struct.block + '.break'
+                mah_stmt = replace_break(mah_stmt, break_stmt, mah_break)
+                break_final = finalize(break_stmt, after, labels, cur_break, cur_cont)
+        # XXX think about conts...
+        mah_cont = struct.block
+        nest_labels = dict(labels)
+        if mah_break is not None:
+            nest_labels[mah_break] = FinalBreak, mah_label
+        nest_labels[mah_cont] = FinalContinue, mah_label
+        cond = ExprConstBool(1)
+        else_ = []
+        inner = finalize(mah_stmt, struct.block, nest_labels, mah_break, mah_cont)
+        if inner and isinstance(inner[0], FinalIf):
+            if inner[0].stmtp and isinstance(inner[0].stmtp[-1], FinalBreak) and inner[0].stmtp[-1].loop is None:
+                cond = ExprNot(inner[0].expr)
+                else_ = inner[0].stmtp[:-1]
+                inner = inner[0].stmtn + inner[1:]
+            elif inner[0].stmtn and isinstance(inner[0].stmtn[-1], FinalBreak) and inner[0].stmtn[-1].loop is None:
+                cond = inner[0].expr
+                else_ = inner[0].stmtn[:-1]
+                inner = inner[0].stmtp + inner[1:]
+        return [
+            FinalWhile(
+                mah_label,
+                cond,
+                inner,
+                else_,
+            )
+        ] + break_final
+    else:
+        assert 0
+
+final = finalize(struct[entry], None, {}, None, None)
 
 if args.debug_domtree or args.print_domtree or args.debug_halfstruct or args.print_halfstruct or args.debug_final:
     print('-' * 30 + ' FINAL RESULT ' + '-' * 30)
 
-def doit(nest, block):
-    indent = nest * '  '
-    print('{}{}'.format(indent, block))
-    mah_block = blocks[block]
-    after = block_after[block]
-    if isinstance(mah_block, EndBlock):
-        print('{}end'.format(indent))
-        assert len(rdom[block]) == 0
-        return None
-    elif isinstance(mah_block, ReturnBlock):
-        print('{}return'.format(indent))
-        assert len(rdom[block]) == 0
-        return None
-    elif isinstance(mah_block, UncondBlock):
-        if not rdom[block]:
-            return mah_block.out
-        assert rdom[block] == {mah_block.out}
-        return doit(nest, mah_block.out)
-    elif isinstance(blocks[block], CondBlock):
-        join = block_join[block]
-        if not rdom[block]:
-            if mah_block.outp == after:
-                neg = True
-                join = after
-            elif mah_block.outn == after:
-                neg = False
-                join = after
-            else:
-                neg = False
-                after = None
-        elif len(rdom[block]) == 1:
-            if mah_block.outp == after:
-                neg = True
-                join = after
-            elif mah_block.outn == after:
-                neg = False
-                join = after
-            elif mah_block.outp not in rdom[block]:
-                neg = False
-                join = mah_block.outn
-            else:
-                neg = True
-                join = mah_block.outp
-        else:
-            if join == mah_block.outp:
-                neg = True
-            else:
-                neg = False
-        if neg:
-            print('{}if (!({})) {{'.format(indent, blocks[block].cond))
-            first = mah_block.outn
-            second = mah_block.outp
-        else:
-            print('{}if ({}) {{'.format(indent, blocks[block].cond))
-            first = mah_block.outp
-            second = mah_block.outn
-        #print(block, first, second, join)
-        if second == join:
-            second = None
-        elif join is None:
-            join = second
-            second = None
-        #print(block, first, second, join)
-        join_used = False
-        orig_first = first
-        if first in rdom[block]:
-            first = doit(nest+1, first)
-        if first is not None:
-            if first == join:
-                join_used = True
-            else:
-                print('{}  goto {}'.format(indent, first))
-        orig_second = second
-        if second is not None:
-            print('{}}} else {{'.format(indent))
-            if second in rdom[block]:
-                second = doit(nest+1, second)
-            if second is not None:
-                if second == join:
-                    join_used = True
-                else:
-                    print('{}  goto {}'.format(indent, second))
-        print('{}}}'.format(indent))
-        for x in rdom[block]:
-            if x not in {orig_first, orig_second, join}:
-                if join_used:
-                    print('{}if (0) {{'.format(indent))
-                    x = doit(nest+1, x)
-                    if x is not None and x != join:
-                        print('{}  goto {}'.format(indent, x))
-                    print('{}}}'.format(indent))
-                else:
-                    if join is None:
-                        join = doit(nest, x)
-                    else:
-                        x = doit(nest, x)
-                        if x is not None:
-                            if x == join:
-                                join_used = True
-                            else:
-                                print('{}goto {}'.format(indent, x))
-        orig_join = join
-        if join is not None and join in rdom[block]:
-            join = doit(nest, join)
-        #print(block, after, orig_first, orig_second, orig_join, first, second, join)
-        return join
-
-final = doit(0, entry)
-if final is not None:
-    print('goto {}'.format(final))
+fdisp(0, final)
