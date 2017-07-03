@@ -574,6 +574,7 @@ def sdisps(nest, s):
         sdisps(nest+1, s.stmt)
         print('{}}}'.format(indent))
     elif isinstance(s, StructHeavy):
+        print('{}// H'.format(indent))
         sdisps(nest, s.stmt)
     else:
         print('{}{}'.format(indent, type(s)))
@@ -712,23 +713,20 @@ def simplify(struct):
                     neg = False
                 assert is_de(de)
                 assert is_e(e)
-                if is_e(de.stmtp):
-                    if de.stmtp.exit != e.exit:
-                        return struct
+                if is_e(de.stmtp) and de.stmtp.exit == e.exit:
                     assert not de.joins
                     cond_de = ExprCond(de.expr, ExprThen(de.stmtp.expr, ExprConstBool(1)), ExprConstBool(0))
                     cond_e = ExprThen(e.expr, ExprConstBool(1))
                     stmtp = StructExprE(ExprVoid(), e.exit)
                     stmtn = de.stmtn
-                else:
-                    assert is_e(de.stmtn)
-                    if de.stmtn.exit != e.exit:
-                        return struct
+                elif is_e(de.stmtn) and de.stmtn.exit == e.exit:
                     assert not de.joins
                     cond_de = ExprCond(de.expr, ExprConstBool(1), ExprThen(de.stmtn.expr, ExprConstBool(0)))
                     cond_e = ExprThen(e.expr, ExprConstBool(0))
                     stmtp = de.stmtp
                     stmtn = StructExprE(ExprVoid(), e.exit)
+                else:
+                    return struct
                 if neg:
                     cond = ExprCond(
                         struct.expr,
