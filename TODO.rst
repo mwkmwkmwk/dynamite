@@ -1,7 +1,6 @@
 To be shipped for round 1:
 
 - detect ``do while`` / ``for`` through single loop head jump
-- make loop break detection able to pass thru switches
 
 Ideas for later:
 

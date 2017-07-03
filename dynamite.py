@@ -1007,8 +1007,27 @@ def find_breaks(struct, level, top_exits, after, multis):
                 res += find_breaks(x, level+1, top_exits, after, multis)
         return res
     elif isinstance(struct, StructSwitch):
-        # XXX
-        return []
+        res = []
+        for x in struct.joins.values():
+            if x.exits() <= top_exits:
+                outs = {c.out for c in struct.cases}
+                if struct.outd is not None:
+                    outs.add(struct.outd)
+                if x in outs:
+                    if after in x.exits():
+                        kind = BREAK_AFTER
+                    elif multis & x.exits():
+                        kind = BREAK_MULTI
+                    elif x.exits():
+                        kind = BREAK_EXIT
+                    else:
+                        kind = BREAK_MEH
+                    res.append((kind, level, x))
+                else:
+                    res.append((BREAK_JOIN, level, x))
+            else:
+                res += find_breaks(x, level+1, top_exits, after, multis)
+        return res
     else:
         return []
 
@@ -1036,8 +1055,16 @@ def replace_break(struct, break_stmt, break_label):
             }
         )
     elif isinstance(struct, StructSwitch):
-        # XXX
-        return struct
+        return StructSwitch(
+            struct.block,
+            struct.expr,
+            struct.cases,
+            struct.outd,
+            {
+                k: replace_break(v, break_stmt, break_label)
+                for k, v in struct.joins.items()
+            }
+        )
     else:
         return struct
 
