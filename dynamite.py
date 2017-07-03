@@ -17,13 +17,17 @@ parser.add_argument('-H', '--debug-halfstruct', action='store_true', help='debug
 parser.add_argument('-F', '--debug-final', action='store_true', help='debug the final phase')
 args = parser.parse_args()
 
+WEIGHT_LIGHT = 0
+WEIGHT_NORMAL = 1
+WEIGHT_HEAVY = 2
+
 class Block:
     pass
 
 class UncondBlock:
-    def __init__(self, out, heavy):
+    def __init__(self, out, weight):
         self.out = out
-        self.heavy = heavy
+        self.weight = weight
 
     def outs(self):
         return {self.out}
@@ -36,11 +40,11 @@ class UncondBlock:
         self.out = new
 
 class CondBlock:
-    def __init__(self, cond, outp, outn, heavy):
+    def __init__(self, cond, outp, outn, weight):
         self.cond = cond
         self.outp = outp
         self.outn = outn
-        self.heavy = heavy
+        self.weight = weight
 
     def outs(self):
         return {self.outp, self.outn}
@@ -62,11 +66,11 @@ class Case:
         self.out = out
 
 class SwitchBlock:
-    def __init__(self, expr, cases, outd, heavy):
+    def __init__(self, expr, cases, outd, weight):
         self.expr = expr
         self.cases = cases
         self.outd = outd
-        self.heavy = heavy
+        self.weight = weight
 
     def outs(self):
         res = {case.out for case in cases}
@@ -89,8 +93,8 @@ class SwitchBlock:
         assert found
 
 class EndBlock:
-    def __init__(self, heavy):
-        self.heavy = heavy
+    def __init__(self, weight):
+        self.weight = weight
 
     def outs(self):
         return set()
@@ -102,8 +106,8 @@ class EndBlock:
         assert False
 
 class ReturnBlock:
-    def __init__(self):
-        self.heavy = False
+    def __init__(self, weight):
+        self.weight = weight
 
     def outs(self):
         return set()
@@ -133,28 +137,31 @@ with open(args.file) as f:
         if entry is None:
             entry = p[0]
         kind = p[1]
-        heavy = False
+        weight = WEIGHT_NORMAL
         if kind[-1] == '+':
-            heavy = True
+            weight = WEIGHT_HEAVY
+            kind = kind[:-1]
+        elif kind[-1] == '-':
+            weight = WEIGHT_LIGHT
             kind = kind[:-1]
         if kind == 'U':
             if len(p) != 3:
                 raise ValueError("U needs 1 output")
-            blocks[b] = UncondBlock(p[2], heavy)
+            blocks[b] = UncondBlock(p[2], weight)
         elif kind == 'C':
             if len(p) != 5:
                 raise ValueError("C needs 3 params")
-            blocks[b] = CondBlock(p[2], p[3], p[4], heavy)
+            blocks[b] = CondBlock(p[2], p[3], p[4], weight)
             if p[3] == p[4]:
                 raise ValueError("C needs two different exits")
         elif kind == 'E':
             if len(p) != 2:
                 raise ValueError("E needs no params")
-            blocks[b] = EndBlock(heavy)
+            blocks[b] = EndBlock(weight)
         elif kind == 'R':
             if len(p) != 2:
                 raise ValueError("R needs no params")
-            blocks[b] = ReturnBlock()
+            blocks[b] = ReturnBlock(weight)
         elif kind == 'S':
             if len(p) < 3:
                 raise ValueError("S needs at least one param")
@@ -166,7 +173,7 @@ with open(args.file) as f:
             outd = None
             if len(params) % 2:
                 outd = params[-1]
-            blocks[b] = SwitchBlock(p[2], cases, outd, heavy)
+            blocks[b] = SwitchBlock(p[2], cases, outd, weight)
         else:
             raise ValueError("Unknown block type {}".format(p[1]))
 
@@ -226,7 +233,7 @@ while queue:
         if cur_to not in multiin:
             if dom[cur_to] is None:
                 transit = '->' + cur_to
-                blocks[transit] = UncondBlock(cur_to, False)
+                blocks[transit] = UncondBlock(cur_to, WEIGHT_LIGHT)
                 dom[transit] = None
                 rdom[transit] = {cur_to}
                 exits[transit] = dict(exits[cur_to])
@@ -241,7 +248,7 @@ while queue:
                     if args.debug_domtree:
                         print('POSTSPLIT', cur_from, dom[cur_to], cur_to)
                     transit = dom[cur_to] + '->' + cur_to
-                    blocks[transit] = UncondBlock(cur_to, False)
+                    blocks[transit] = UncondBlock(cur_to, WEIGHT_LIGHT)
                     dom[transit] = dom[cur_to]
                     rdom[transit] = {cur_to}
                     exits[transit] = dict(exits[cur_to])
@@ -254,7 +261,7 @@ while queue:
             if args.debug_domtree:
                 print('PRESPLIT', dom[cur_to], cur_from, cur_to)
             transit = cur_from + '->' + cur_to
-            blocks[transit] = UncondBlock(cur_to, False)
+            blocks[transit] = UncondBlock(cur_to, WEIGHT_LIGHT)
             blocks[cur_from].subst_out(cur_to, transit)
             dom[transit] = cur_from
             exits[transit] = {}
@@ -555,9 +562,12 @@ def sdisps(nest, s):
             sdisps(nest+1, v)
     elif isinstance(s, StructReturn):
         print('{}// R'.format(indent))
-        print('{}{}'.format(indent, s.block))
+        if blocks[s.block].weight != WEIGHT_LIGHT:
+            print('{}{}'.format(indent, s.block))
         print('{}return'.format(indent))
     elif isinstance(s, StructSwitch):
+        if blocks[s.block].weight != WEIGHT_LIGHT:
+            print('{}{}'.format(indent, s.block))
         print('{}switch ({}) {{'.format(indent, s.expr))
         for c in s.cases:
             print('{}case {}:'.format(indent, c.value))
@@ -791,7 +801,7 @@ def structify(block):
         res = StructReturn(block)
     elif isinstance(mah_block, UncondBlock):
         mah_expr = ExprLeafOne(block)
-        if '-' in block:
+        if mah_block.weight == WEIGHT_LIGHT:
             mah_expr = ExprVoid()
         if mah_block.out in rdom[block]:
             assert len(rdom[block]) == 1
@@ -811,8 +821,11 @@ def structify(block):
             },
         )
     else:
+        cond = ExprLeafCond(mah_block.cond)
+        if mah_block.weight != WEIGHT_LIGHT:
+            cond = ExprThen(ExprLeafOne(block), cond)
         res = StructExprDD(
-            ExprThen(ExprLeafOne(block), ExprLeafCond(mah_block.cond)),
+            cond,
             struct[mah_block.outp],
             struct[mah_block.outn],
             {
@@ -821,7 +834,7 @@ def structify(block):
             },
         )
     res = simplify(res)
-    if mah_block.heavy:
+    if mah_block.weight == WEIGHT_HEAVY:
         res = StructHeavy(res)
     if block in exits[block]:
         res = StructLoop(block, res)
@@ -1153,10 +1166,10 @@ def finalize(struct, after, labels, cur_break, cur_cont):
                     stmts.append(FinalDefault())
                 else:
                     stmts.append(FinalCase(y))
-        res = [
-            FinalExpr(ExprLeafOne(struct.block)),
-            FinalSwitch(mah_label, struct.expr, stmts),
-        ]
+        res = []
+        if blocks[struct.block].weight != WEIGHT_LIGHT:
+            res.append(FinalExpr(ExprLeafOne(struct.block)))
+        res.append(FinalSwitch(mah_label, struct.expr, stmts))
         if mah_break != after:
             res.append(FinalLabel(mah_break))
             stmt = struct.joins[mah_break]

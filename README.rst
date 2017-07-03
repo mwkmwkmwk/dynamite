@@ -64,3 +64,5 @@ line describes the entry block.  The following kinds of basic blocks exist:
 In addition, appending ``+`` to the block type for any of the above (eg.
 ``<name> U+ <exit>``) will mark this block as "heavy" -- its "body" will not be
 folded into compound conditions, possibly forcing ``goto`` to be used instead.
+Lightwise, appending ``-`` to the block type will mark this block as "light"
+-- its body will be considered to be completely uninteresting and folded away.
