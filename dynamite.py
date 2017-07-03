@@ -26,7 +26,7 @@ class UncondBlock:
         self.heavy = heavy
 
     def outs(self):
-        return [self.out]
+        return {self.out}
 
     def __str__(self):
         return '-> {}'.format(self.out)
@@ -43,7 +43,7 @@ class CondBlock:
         self.heavy = heavy
 
     def outs(self):
-        return [self.outp, self.outn]
+        return {self.outp, self.outn}
 
     def __str__(self):
         return '-> {} ? {} : {}'.format(self.cond, self.outp, self.outn)
@@ -69,7 +69,10 @@ class SwitchBlock:
         self.heavy = heavy
 
     def outs(self):
-        return ([self.outd] if self.outd else []) + [case.out for case in cases]
+        res = {case.out for case in cases}
+        if self.outd is not None:
+            res.add(self.outd)
+        return res
 
     def __str__(self):
         return '-> {} switch {} default {}'.format(self.expr, ', '.join('{}: {}'.format(x.value, x.out) for x in self.cases), self.outd)
@@ -90,7 +93,7 @@ class EndBlock:
         self.heavy = heavy
 
     def outs(self):
-        return []
+        return set()
 
     def __str__(self):
         return '-> /'
@@ -103,7 +106,7 @@ class ReturnBlock:
         self.heavy = False
 
     def outs(self):
-        return []
+        return set()
 
     def __str__(self):
         return '-> RETURN'
@@ -142,6 +145,8 @@ with open(args.file) as f:
             if len(p) != 5:
                 raise ValueError("C needs 3 params")
             blocks[b] = CondBlock(p[2], p[3], p[4], heavy)
+            if p[3] == p[4]:
+                raise ValueError("C needs two different exits")
         elif kind == 'E':
             if len(p) != 2:
                 raise ValueError("E needs no params")
