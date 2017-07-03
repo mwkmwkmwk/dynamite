@@ -60,3 +60,7 @@ line describes the entry block.  The following kinds of basic blocks exist:
   and ``<exitX>`` are corresponding basic blocks.  ``<exit-default>``, if present,
   is the basic block to be executed if none of the values matched (if not present,
   we assume we have no idea what will happen for values not present in the table).
+
+In addition, appending ``+`` to the block type for any of the above (eg.
+``<name> U+ <exit>``) will mark this block as "heavy" -- its "body" will not be
+folded into compound conditions, possibly forcing ``goto`` to be used instead.

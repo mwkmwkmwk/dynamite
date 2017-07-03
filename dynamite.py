@@ -21,8 +21,9 @@ class Block:
     pass
 
 class UncondBlock:
-    def __init__(self, out):
+    def __init__(self, out, heavy):
         self.out = out
+        self.heavy = heavy
 
     def outs(self):
         return [self.out]
@@ -35,10 +36,11 @@ class UncondBlock:
         self.out = new
 
 class CondBlock:
-    def __init__(self, cond, outp, outn):
+    def __init__(self, cond, outp, outn, heavy):
         self.cond = cond
         self.outp = outp
         self.outn = outn
+        self.heavy = heavy
 
     def outs(self):
         return [self.outp, self.outn]
@@ -60,10 +62,11 @@ class Case:
         self.out = out
 
 class SwitchBlock:
-    def __init__(self, expr, cases, outd):
+    def __init__(self, expr, cases, outd, heavy):
         self.expr = expr
         self.cases = cases
         self.outd = outd
+        self.heavy = heavy
 
     def outs(self):
         return ([self.outd] if self.outd else []) + [case.out for case in cases]
@@ -83,6 +86,9 @@ class SwitchBlock:
         assert found
 
 class EndBlock:
+    def __init__(self, heavy):
+        self.heavy = heavy
+
     def outs(self):
         return []
 
@@ -93,6 +99,9 @@ class EndBlock:
         assert False
 
 class ReturnBlock:
+    def __init__(self):
+        self.heavy = False
+
     def outs(self):
         return []
 
@@ -120,23 +129,28 @@ with open(args.file) as f:
             raise ValueError("Duplicate block {}".format(b))
         if entry is None:
             entry = p[0]
-        if p[1] == 'U':
+        kind = p[1]
+        heavy = False
+        if kind[-1] == '+':
+            heavy = True
+            kind = kind[:-1]
+        if kind == 'U':
             if len(p) != 3:
                 raise ValueError("U needs 1 output")
-            blocks[b] = UncondBlock(p[2])
-        elif p[1] == 'C':
+            blocks[b] = UncondBlock(p[2], heavy)
+        elif kind == 'C':
             if len(p) != 5:
                 raise ValueError("C needs 3 params")
-            blocks[b] = CondBlock(p[2], p[3], p[4])
-        elif p[1] == 'E':
+            blocks[b] = CondBlock(p[2], p[3], p[4], heavy)
+        elif kind == 'E':
             if len(p) != 2:
                 raise ValueError("E needs no params")
-            blocks[b] = EndBlock()
-        elif p[1] == 'R':
+            blocks[b] = EndBlock(heavy)
+        elif kind == 'R':
             if len(p) != 2:
                 raise ValueError("R needs no params")
             blocks[b] = ReturnBlock()
-        elif p[1] == 'S':
+        elif kind == 'S':
             if len(p) < 3:
                 raise ValueError("S needs at least one param")
             params = p[3:]
@@ -147,7 +161,7 @@ with open(args.file) as f:
             outd = None
             if len(params) % 2:
                 outd = params[-1]
-            blocks[b] = SwitchBlock(p[2], cases, outd)
+            blocks[b] = SwitchBlock(p[2], cases, outd, heavy)
         else:
             raise ValueError("Unknown block type {}".format(p[1]))
 
@@ -207,7 +221,7 @@ while queue:
         if cur_to not in multiin:
             if dom[cur_to] is None:
                 transit = '->' + cur_to
-                blocks[transit] = UncondBlock(cur_to)
+                blocks[transit] = UncondBlock(cur_to, False)
                 dom[transit] = None
                 rdom[transit] = {cur_to}
                 exits[transit] = dict(exits[cur_to])
@@ -222,7 +236,7 @@ while queue:
                     if args.debug_domtree:
                         print('POSTSPLIT', cur_from, dom[cur_to], cur_to)
                     transit = dom[cur_to] + '->' + cur_to
-                    blocks[transit] = UncondBlock(cur_to)
+                    blocks[transit] = UncondBlock(cur_to, False)
                     dom[transit] = dom[cur_to]
                     rdom[transit] = {cur_to}
                     exits[transit] = dict(exits[cur_to])
@@ -235,7 +249,7 @@ while queue:
             if args.debug_domtree:
                 print('PRESPLIT', dom[cur_to], cur_from, cur_to)
             transit = cur_from + '->' + cur_to
-            blocks[transit] = UncondBlock(cur_to)
+            blocks[transit] = UncondBlock(cur_to, False)
             blocks[cur_from].subst_out(cur_to, transit)
             dom[transit] = cur_from
             exits[transit] = {}
@@ -430,6 +444,14 @@ class StructExprD:
     def exits(self):
         return self._exits
 
+class StructHeavy:
+    def __init__(self, stmt):
+        self.stmt = stmt
+        self._exits = stmt.exits()
+
+    def exits(self):
+        return self._exits
+
 class StructExprDD:
     def __init__(self, expr, stmtp, stmtn, joins):
         assert expr.arity() == 2
@@ -546,6 +568,8 @@ def sdisps(nest, s):
         print('{}{}: while (1) {{'.format(indent, s.block))
         sdisps(nest+1, s.stmt)
         print('{}}}'.format(indent))
+    elif isinstance(s, StructHeavy):
+        sdisps(nest, s.stmt)
     else:
         print('{}{}'.format(indent, type(s)))
         assert 0
@@ -794,6 +818,8 @@ def structify(block):
             },
         )
     res = simplify(res)
+    if mah_block.heavy:
+        res = StructHeavy(res)
     if block in exits[block]:
         res = StructLoop(block, res)
     struct[block] = res
@@ -1171,6 +1197,8 @@ def finalize(struct, after, labels, cur_break, cur_cont):
                 else_,
             )
         ] + break_final
+    elif isinstance(struct, StructHeavy):
+        return finalize(struct.stmt, after, labels, cur_break, cur_cont)
     else:
         assert 0
 

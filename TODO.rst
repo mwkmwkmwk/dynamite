@@ -2,7 +2,6 @@ To be shipped for round 1:
 
 - detect ``do while`` / ``for`` through single loop head jump
 - make loop break detection able to pass thru switches
-- add a "complex" block type that prevents converting to an expression
 
 Ideas for later:
 
