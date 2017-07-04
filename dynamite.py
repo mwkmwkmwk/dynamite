@@ -1214,7 +1214,6 @@ def finalize(struct, after, labels, cur_break, cur_cont):
                 mah_break = struct.block + '.break'
                 mah_stmt = replace_break(mah_stmt, break_stmt, mah_break)
                 break_final = finalize(break_stmt, after, labels, cur_break, cur_cont)
-        # XXX think about conts...
         mah_cont = struct.block
         nest_labels = dict(labels)
         if mah_break is not None:

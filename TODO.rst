@@ -1,10 +1,5 @@
-To be shipped for round 1:
-
-- detect ``do while`` / ``for`` through single loop head jump
-
 Ideas for later:
 
-- allow manually specifying loop breaks
 - improve joins structuralization:
 
   - try to ensure the final join actually has an edge to ``after``
@@ -47,19 +42,23 @@ Ideas for later:
     c();
     return;
 
-- improve loop break selection heuristics:
+- loop improvements:
 
-  - make it deterministic
-  - like above, try to maximize break weight, all else being equal
-  - if settling for a break at an exit, make sure it's actually used more
-    than once
-  - perhaps lower the priority of break-at-exit drastically, or remove
-    it altogether?  Just about the only useful case is connecting this
-    loop's break to parent's break/continue...
-  - consider long chains of blocks ending with a noreturn call as well
-    (need to partially reverse half-structuralization for these?)
+  - detect ``do while`` / ``for`` through single loop head jump
+  - try detecting glued loop heads?
+  - allow manually specifying loop breaks
+  - improve loop break selection heuristics:
 
-- try detecting glued loop heads?
+    - make it deterministic
+    - like above, try to maximize break weight, all else being equal
+    - if settling for a break at an exit, make sure it's actually used more
+      than once
+    - perhaps lower the priority of break-at-exit drastically, or remove
+      it altogether?  Just about the only useful case is connecting this
+      loop's break to parent's break/continue...
+    - consider long chains of blocks ending with a noreturn call as well
+      (need to partially reverse half-structuralization for these?)
+
 - if a return block contains no interesting instructions and has incoming
   gotos, just change them to a "return"
 - convert if trees to switches [requires a better input format]
