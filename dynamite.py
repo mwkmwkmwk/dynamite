@@ -707,10 +707,10 @@ def simplify(struct):
                     struct = StructExprE(
                         ExprCond(
                             struct.expr,
-                            stmtp.expr,
-                            stmtn.expr,
+                            struct.stmtp.expr,
+                            struct.stmtn.expr,
                         ),
-                        stmtp.exit
+                        struct.stmtp.exit
                     )
             elif (is_e(struct.stmtp) and is_de(struct.stmtn)) or (is_de(struct.stmtp) and is_e(struct.stmtn)):
                 if is_e(struct.stmtp):
