@@ -329,9 +329,9 @@ if args.graphviz is not None:
             elif blocks[block].weight == WEIGHT_HEAVY:
                 style = 'bold'
             if '->' in block:
-                of.write('"{}" [shape=none, margin=0];'.format(block))
+                of.write('"{}" [shape=none, margin=0];\n'.format(block))
             else:
-                of.write('"{}" [shape={}, style={}];'.format(block, shape, style))
+                of.write('"{}" [shape={}, style={}];\n'.format(block, shape, style))
             outset = set(blocks[block].outs())
             for b in blocks[block].outs():
                 if isinstance(blocks[block], CondBlock):
