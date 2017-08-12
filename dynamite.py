@@ -10,6 +10,7 @@ import argparse
 
 parser = argparse.ArgumentParser(description='Structuralize a list of basic blocks.', conflict_handler='resolve')
 parser.add_argument('file', help='the input file')
+parser.add_argument('-c', '--split-critical', action='store_true', help='split critical edges')
 parser.add_argument('-d', '--print-domtree', action='store_true', help='print the dominator tree')
 parser.add_argument('-D', '--debug-domtree', action='store_true', help='debug the dominator tree construction phase')
 parser.add_argument('-h', '--print-halfstruct', action='store_true', help='print the half-structures')
@@ -231,7 +232,7 @@ while queue:
     else:
         if args.debug_domtree:
             print('CONSIDER', dom[cur_to], cur_from, cur_to, cur_to in multiin)
-        if cur_to not in multiin:
+        if cur_to not in multiin and args.split_critical:
             if dom[cur_to] is None:
                 transit = '->' + cur_to
                 blocks[transit] = UncondBlock(cur_to, WEIGHT_LIGHT)
@@ -257,8 +258,8 @@ while queue:
                     rdom[dom[cur_to]].remove(cur_to)
                     rdom[dom[cur_to]].add(transit)
                     dom[cur_to] = transit
-            multiin.add(cur_to)
-        if cur_from is not None and cur_to in blocks[cur_from].outs() and not isinstance(blocks[cur_from], UncondBlock):
+        multiin.add(cur_to)
+        if cur_from is not None and cur_to in blocks[cur_from].outs() and not isinstance(blocks[cur_from], UncondBlock) and args.split_critical:
             if args.debug_domtree:
                 print('PRESPLIT', dom[cur_to], cur_from, cur_to)
             transit = cur_from + '->' + cur_to
@@ -879,17 +880,26 @@ def structify(block):
         )
     else:
         cond = ExprLeafCond(mah_block.cond)
+        all_exits = {
+            e
+            for x in rdom[block]
+            for e in exits[x]
+        }
+        joins = {
+            x: struct[x]
+            for x in rdom[block]
+        }
+        if mah_block.outp not in all_exits and mah_block.outp in joins:
+            sp = joins.pop(mah_block.outp)
+        else:
+            sp = StructExprE(ExprVoid(), mah_block.outp)
+        if mah_block.outn not in all_exits and mah_block.outn in joins:
+            sn = joins.pop(mah_block.outn)
+        else:
+            sn = StructExprE(ExprVoid(), mah_block.outn)
         if mah_block.weight != WEIGHT_LIGHT:
             cond = ExprThen(ExprLeafOne(block), cond)
-        res = StructExprDD(
-            cond,
-            struct[mah_block.outp],
-            struct[mah_block.outn],
-            {
-                x: struct[x]
-                for x in rdom[block] - {mah_block.outp, mah_block.outn}
-            },
-        )
+        res = StructExprDD(cond, sp, sn, joins)
     res = simplify(res)
     if mah_block.weight == WEIGHT_HEAVY:
         res = StructHeavy(res)

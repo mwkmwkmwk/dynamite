@@ -1,6 +1,6 @@
 Graphviz:
 
-- make crit edge splitting optional
+- display conditions on the graph
 - visualize exits
 - apply toposort to joins
 - select nice headport for blue edges

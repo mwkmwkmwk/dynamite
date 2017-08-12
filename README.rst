@@ -29,6 +29,7 @@ Usage
 
 The following options are supported:
 
+- ``-c``: split critical edges
 - ``-d``: print the computed dominator tree
 - ``-D``: enable debug info from dominator tree construction phase
 - ``-h``: print result of the half-structuralization phase
