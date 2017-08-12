@@ -1,3 +1,11 @@
+Graphviz:
+
+- make crit edge splitting optional
+- visualize exits
+- apply toposort to joins
+- select nice headport for blue edges
+- visualize loops as clusters
+
 Ideas for later:
 
 - improve joins structuralization:

@@ -34,6 +34,8 @@ The following options are supported:
 - ``-h``: print result of the half-structuralization phase
 - ``-H``: enable debug info from the half-structuralization phase
 - ``-F``: enable debug info from the final phase
+- ``-g <FILE>``: write the computed dominator tree in graphviz format to
+  a given file
 
 Input file syntax
 -----------------

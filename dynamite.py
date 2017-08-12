@@ -15,6 +15,7 @@ parser.add_argument('-D', '--debug-domtree', action='store_true', help='debug th
 parser.add_argument('-h', '--print-halfstruct', action='store_true', help='print the half-structures')
 parser.add_argument('-H', '--debug-halfstruct', action='store_true', help='debug the half-structuralization phase')
 parser.add_argument('-F', '--debug-final', action='store_true', help='debug the final phase')
+parser.add_argument('-g', '--graphviz', help='emit graphviz visualization of the dominator tree')
 args = parser.parse_args()
 
 WEIGHT_LIGHT = 0
@@ -30,7 +31,7 @@ class UncondBlock:
         self.weight = weight
 
     def outs(self):
-        return {self.out}
+        return [self.out]
 
     def __str__(self):
         return '-> {}'.format(self.out)
@@ -47,7 +48,7 @@ class CondBlock:
         self.weight = weight
 
     def outs(self):
-        return {self.outp, self.outn}
+        return [self.outp, self.outn]
 
     def __str__(self):
         return '-> {} ? {} : {}'.format(self.cond, self.outp, self.outn)
@@ -73,9 +74,9 @@ class SwitchBlock:
         self.weight = weight
 
     def outs(self):
-        res = {case.out for case in cases}
+        res = [case.out for case in cases]
         if self.outd is not None:
-            res.add(self.outd)
+            res.append(self.outd)
         return res
 
     def __str__(self):
@@ -97,7 +98,7 @@ class EndBlock:
         self.weight = weight
 
     def outs(self):
-        return set()
+        return []
 
     def __str__(self):
         return '-> /'
@@ -110,7 +111,7 @@ class ReturnBlock:
         self.weight = weight
 
     def outs(self):
-        return set()
+        return []
 
     def __str__(self):
         return '-> RETURN'
@@ -301,6 +302,62 @@ while queue:
 if args.print_domtree or args.debug_domtree:
     print('-' * 20 + ' DOMINATOR TREE ' + '-' * 20)
     disp(0, entry)
+
+# GRAPHVIZ OUTPUT
+
+if args.graphviz is not None:
+    with open(args.graphviz, 'w') as of:
+        def emit_gv(block):
+            shape = 'box'
+            tailport = 's'
+            if isinstance(blocks[block], UncondBlock):
+                shape = 'box'
+                tailport = 's'
+            elif isinstance(blocks[block], CondBlock):
+                shape = 'diamond'
+            elif isinstance(blocks[block], SwitchBlock):
+                shape = 'trapezium'
+                tailport = '_'
+            elif isinstance(blocks[block], EndBlock):
+                shape = 'box'
+            elif isinstance(blocks[block], ReturnBlock):
+                shape = 'ellipse'
+            style = 'solid'
+            if blocks[block].weight == WEIGHT_LIGHT:
+                style = 'dotted'
+            elif blocks[block].weight == WEIGHT_HEAVY:
+                style = 'bold'
+            if '->' in block:
+                of.write('"{}" [shape=none, margin=0];'.format(block))
+            else:
+                of.write('"{}" [shape={}, style={}];'.format(block, shape, style))
+            outset = set(blocks[block].outs())
+            for b in blocks[block].outs():
+                if isinstance(blocks[block], CondBlock):
+                    if b == blocks[block].outp:
+                        tailport = 'sw'
+                    elif b == blocks[block].outn:
+                        tailport = 'se'
+                if b in rdom[block]:
+                    of.write('"{}" -> "{}" [tailport={}, headport=n];\n'.format(block, b, tailport))
+                else:
+                    d = block
+                    while d != entry and d != b:
+                        d = dom[d]
+                    if d == b:
+                        of.write('"{}" -> "{}" [color=green, constraint=false, tailport={}, headport=n];\n'.format(block, b, tailport))
+                    else:
+                        of.write('"{}" -> "{}" [color=blue, constraint=false, tailport={}];\n'.format(block, b, tailport))
+            for b in rdom[block]:
+                emit_gv(b)
+                if b not in outset:
+                    of.write('"{}" -> "{}" [color=red, headport=n, tailport=e];\n'.format(block, b))
+        of.write('digraph G {\n')
+        of.write('ordering=out;\n')
+        of.write('"" [shape=none];\n')
+        of.write('"" -> "{}";\n'.format(entry))
+        emit_gv(entry)
+        of.write('}\n')
 
 # PHASE 3: HALF-STRUCTURALIZE
 
