@@ -41,6 +41,14 @@ class UncondBlock:
         assert old == self.out
         self.out = new
 
+class CritSplitBlock(UncondBlock):
+    def __str__(self):
+        return '-> {} [critical edge split]'.format(self.out)
+
+class FrontMergeBlock(UncondBlock):
+    def __str__(self):
+        return '-> {} [frontier merge]'.format(self.out)
+
 class CondBlock:
     def __init__(self, cond, outp, outn, weight):
         self.cond = cond
@@ -183,13 +191,13 @@ with open(args.file) as f:
 
 queue = [(None, entry)]
 dom = {}
-rdom = {None: set()}
-exits = {}
+rdom = {None: []}
+front = {}
 multiin = set()
 
 def disp(nest, block):
     indent = nest * '  '
-    print('{}{} {}; EXITS: {}; DOM: {}'.format(indent, block, blocks[block], ', '.join('{}[{}]'.format(k, v) if v != block else k for k, v in exits[block].items()), dom[block]))
+    print('{}{} {}; EXITS: {}; DOM: {}'.format(indent, block, blocks[block], ', '.join(front[block]), dom[block]))
     for c in rdom[block]:
         disp(nest+1, c)
 
@@ -215,14 +223,14 @@ def lca(a, b):
 while queue:
     if args.debug_domtree:
         print('-' * 10 + ' DOMTREE ITERATION ' + '-' * 10)
-    cur_from, cur_to = queue.pop()
+    cur_from, cur_to = queue.pop(0)
     if cur_to not in dom:
         if args.debug_domtree:
             print('NEW', cur_from, cur_to)
         dom[cur_to] = cur_from
-        exits[cur_to] = {}
-        rdom[cur_to] = set()
-        rdom[cur_from].add(cur_to)
+        front[cur_to] = []
+        rdom[cur_to] = []
+        rdom[cur_from].append(cur_to)
         if cur_to not in blocks:
             raise ValueError("Unknown block {}".format(cur_to))
         for out in blocks[cur_to].outs():
@@ -235,14 +243,13 @@ while queue:
         if cur_to not in multiin and args.split_critical:
             if dom[cur_to] is None:
                 transit = '->' + cur_to
-                blocks[transit] = UncondBlock(cur_to, WEIGHT_LIGHT)
+                blocks[transit] = CritSplitBlock(cur_to, WEIGHT_LIGHT)
                 dom[transit] = None
-                rdom[transit] = {cur_to}
-                exits[transit] = dict(exits[cur_to])
+                rdom[transit] = [cur_to]
+                front[transit] = front[cur_to][:]
                 assert entry == cur_to
                 entry = transit
-                rdom[None].remove(cur_to)
-                rdom[None].add(transit)
+                rdom[None] = [transit]
                 dom[cur_to] = transit
             else:
                 parent = blocks[dom[cur_to]]
@@ -250,51 +257,48 @@ while queue:
                     if args.debug_domtree:
                         print('POSTSPLIT', cur_from, dom[cur_to], cur_to)
                     transit = dom[cur_to] + '->' + cur_to
-                    blocks[transit] = UncondBlock(cur_to, WEIGHT_LIGHT)
+                    blocks[transit] = CritSplitBlock(cur_to, WEIGHT_LIGHT)
                     dom[transit] = dom[cur_to]
-                    rdom[transit] = {cur_to}
-                    exits[transit] = dict(exits[cur_to])
+                    rdom[transit] = [cur_to]
+                    front[transit] = front[cur_to][:]
                     parent.subst_out(cur_to, transit)
                     rdom[dom[cur_to]].remove(cur_to)
-                    rdom[dom[cur_to]].add(transit)
+                    rdom[dom[cur_to]].append(transit)
                     dom[cur_to] = transit
         multiin.add(cur_to)
         if cur_from is not None and cur_to in blocks[cur_from].outs() and not isinstance(blocks[cur_from], UncondBlock) and args.split_critical:
             if args.debug_domtree:
                 print('PRESPLIT', dom[cur_to], cur_from, cur_to)
             transit = cur_from + '->' + cur_to
-            blocks[transit] = UncondBlock(cur_to, WEIGHT_LIGHT)
+            blocks[transit] = CritSplitBlock(cur_to, WEIGHT_LIGHT)
             blocks[cur_from].subst_out(cur_to, transit)
             dom[transit] = cur_from
-            exits[transit] = {}
-            rdom[transit] = set()
-            rdom[cur_from].add(transit)
+            front[transit] = []
+            rdom[transit] = []
+            rdom[cur_from].append(transit)
             cur_from = transit
         cur_dom = dom[cur_to]
         new_dom = lca(cur_dom, cur_from)
         if cur_dom != new_dom:
             rdom[cur_dom].remove(cur_to)
             while cur_dom != new_dom:
-                new_outs = {x : cur_dom for x in blocks[cur_dom].outs() if x not in rdom[cur_dom]}
+                new_front = [x for x in blocks[cur_dom].outs() if x not in rdom[cur_dom]]
                 for c in rdom[cur_dom]:
-                    for new_out, out_dom in exits[c].items():
-                        if new_out in rdom[cur_dom]:
+                    for new_out in front[c]:
+                        if new_out in rdom[cur_dom] or new_out in new_front:
                             continue
-                        if new_out in new_outs:
-                            new_outs[new_out] = lca(out_dom, new_outs[new_out])
-                        else:
-                            new_outs[new_out] = out_dom
-                exits[cur_dom] = new_outs
+                        new_front.append(new_out)
+                front[cur_dom] = new_front
                 cur_dom = dom[cur_dom]
             dom[cur_to] = new_dom
-            rdom[new_dom].add(cur_to)
-            for x in exits[cur_to]:
+            rdom[new_dom].append(cur_to)
+            for x in front[cur_to]:
                 if args.debug_domtree:
                     print('REQUEUE', cur_to, x)
                 queue.append((cur_to, x))
         orig_from = cur_from
         while cur_from != new_dom:
-            exits[cur_from][cur_to] = orig_from
+            front[cur_from].append(cur_to)
             cur_from = dom[cur_from]
     if args.debug_domtree:
         disp(0, entry)
@@ -338,8 +342,10 @@ if args.graphviz is not None:
                 ]
                 label = '<<table cellspacing="0" border="0" cellborder="1">{}</table>>'.format(''.join(rows))
                 of.write('"node_{}" [shape=plain, label={}];\n'.format(block, label))
-            elif '->' in block:
+            elif isinstance(blocks[block], CritSplitBlock):
                 of.write('"node_{}" [shape=invtriangle, label="", width=0.1, height=0.1];\n'.format(block))
+            elif isinstance(blocks[block], FrontMergeBlock):
+                of.write('"node_{}" [shape=triangle, label="", width=0.1, height=0.1];\n'.format(block))
             else:
                 if blocks[block].weight == WEIGHT_LIGHT:
                     of.write('"node_{}" [label="{}", shape=box, style=dotted];\n'.format(block, block))
@@ -917,7 +923,7 @@ def structify(block):
         all_exits = {
             e
             for x in rdom[block]
-            for e in exits[x]
+            for e in front[x]
         }
         joins = {
             x: struct[x]
@@ -937,7 +943,7 @@ def structify(block):
     res = simplify(res)
     if mah_block.weight == WEIGHT_HEAVY:
         res = StructHeavy(res)
-    if block in exits[block]:
+    if block in front[block]:
         res = StructLoop(block, res)
     struct[block] = res
 
