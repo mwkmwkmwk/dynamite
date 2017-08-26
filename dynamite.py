@@ -505,7 +505,9 @@ class ExprNot:
         if isinstance(expr, ExprThen):
             return ExprThen(expr.expra, ExprNot(expr.exprb))
         if isinstance(expr, ExprCond):
-            return ExprCond(expr.exprc, ExprNot(expr.expra), ExprNot(expr.exprb))
+            return ExprCond(expr.exprc, ExprNot(expr.exprp), ExprNot(expr.exprn))
+        if isinstance(expr, ExprConstBool):
+            return ExprConstBool(not expr.which)
         self = super().__new__(cls)
         self.expr = expr
         return self
