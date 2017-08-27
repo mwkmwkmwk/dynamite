@@ -23,9 +23,10 @@ class ParseOOBError(Exception):
 
 
 class ParseState:
-    def __init__(self, res, data, pos):
+    def __init__(self, res, data, data_base, pos):
         self.res = res
         self.data = data
+        self.data_base = data_base
         self.pos = pos
 
 
@@ -49,17 +50,21 @@ class ParseWord:
             assert self.endian in ('little', 'big')
         mask = 0
         val = 0
+        fail = False
         for x in range(nbytes):
             if self.endian == 'little':
                 shift = x * width
             else:
                 shift = (nbytes - 1 - x) * width
-            if pstate.pos + x < len(pstate.data):
-                val |= pstate.data[pstate.pos + x] << shift
+            rpos = pstate.pos + x - pstate.data_base
+            if rpos >= 0 and rpos < len(pstate.data):
+                val |= pstate.data[rpos] << shift
                 mask |= ((1 << width) - 1) << shift
+            else:
+                fail = True
         self.field.set(pstate.res, val, mask)
         pstate.pos += nbytes
-        if pstate.pos > len(pstate.data):
+        if fail:
             err = ParseOOBError("reading {} failed".format(self.field))
             pstate.res.errors.append(err)
 

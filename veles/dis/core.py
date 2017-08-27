@@ -73,7 +73,7 @@ class Isa:
     # The top-level parser.  Subclasses need to override this.
     parser = None
 
-    def parse(self, data, base=None, pos=0):
+    def parse(self, data, data_base=0, base=None, pos=0):
         """
         Runs the disassembler on given data, returning an IsaParseResult
         instance.  ``pos`` is the position in ``data`` to start disassembly
@@ -84,7 +84,7 @@ class Isa:
         # XXX: the whole thing should use BinData, and support extra offset
         # to pos.
         res = IsaParseResult(base, pos)
-        s = ParseState(res, data, pos)
+        s = ParseState(res, data, data_base, pos)
         for x in self.parser:
             x.parse(s)
         def rebuilder_anchor(cls, *args):

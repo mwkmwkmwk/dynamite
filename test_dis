@@ -28,7 +28,7 @@ for x in sys.argv[1:]:
 pos = 0
 while pos < len(data):
     base = SemaVar(32, 'aaa')
-    res = FalconIsa().parse(BinData(8, data), base, pos)
+    res = FalconIsa().parse(BinData(8, data), 0, base, pos)
     # pprint(res.__dict__)
     print('{:08x} {:18} {}'.format(pos, ' '.join(format(x, '02x') for x in data[pos:pos+res.len]), (' '*28 + '\n').join(str(x) for x in res.insns)))
     pos += res.len

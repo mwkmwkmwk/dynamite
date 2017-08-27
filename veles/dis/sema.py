@@ -12,6 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import operator
+from weakref import WeakValueDictionary
+
 from .reg import BaseRegister
 from .special import Special, SpecialHalt, Syscall
 from .mem import MemSpace
@@ -33,7 +36,55 @@ class SemaOp:
     pass
 
 
+expr_cache = WeakValueDictionary()
+
+
+class ConstFoldBin:
+    def __init__(self, op):
+        self.op = op
+
+    def __call__(self, cls, va, vb):
+        if isinstance(va, SemaConst) and isinstance(vb, SemaConst):
+            return SemaConst(va.width, self.op(va.val, vb.val))
+
+
+class ConstFoldBinPred:
+    def __init__(self, op):
+        self.op = op
+
+    def __call__(self, cls, va, vb):
+        if isinstance(va, SemaConst) and isinstance(vb, SemaConst):
+            return SemaConst(1, self.op(va.val, vb.val))
+
+
+def fold_const_swap(cls, va, vb):
+    if isinstance(va, SemaConst) and not isinstance(vb, SemaConst):
+        return cls(vb, va)
+
+
+def fold_const_reass(cls, va, vb):
+    if isinstance(va, cls) and isinstance(vb, SemaConst):
+        return cls(va.va, cls(va.vb, vb))
+
+
 class SemaExpr:
+    folders = []
+
+    def __new__(cls, *args):
+        args = cls.validate_args(*args)
+        all_args = cls, *args
+        if all_args in expr_cache:
+            return expr_cache[all_args]
+        for folder in cls.folders:
+            res = folder(cls, *args)
+            if res is not None:
+                return res
+        self = super().__new__(cls)
+        self.init(*args)
+        expr_cache[all_args] = self
+        self._args = all_args
+        return self
+
     def __add__(self, other):
         return SemaAdd(self, other)
 
@@ -77,34 +128,16 @@ class SemaExpr:
     def __rshift__(self, other):
         return SemaShr(self, other)
 
-    def __eq__(self, other):
-        return SemaEq(self, other)
-
-
-class SemaVar(SemaExpr):
-    def __init__(self, width, name):
-        assert isinstance(width, int)
-        assert width >= 0
-        assert isinstance(name, str)
-        self.width = width
-        self.name = name
-
-    def rebuild(self, rebuilder):
-        return rebuilder(
-            type(self),
-            self.width,
-            self.name,
-        )
-
-    def __str__(self):
-        return self.name
-
 
 class SemaConst(SemaExpr):
-    def __init__(self, width, val):
+    @classmethod
+    def validate_args(cls, width, val):
         assert isinstance(width, int)
         assert width >= 0
         assert isinstance(val, int)
+        return width, val
+
+    def init(self, width, val):
         self.width = width
         self.val = val & ((1 << width) - 1)
 
@@ -119,8 +152,32 @@ class SemaConst(SemaExpr):
         return 'uint{}_t({:#x})'.format(self.width, self.val)
 
 
+class SemaVar(SemaExpr):
+    @classmethod
+    def validate_args(cls, width, name):
+        assert isinstance(width, int)
+        assert width >= 0
+        assert isinstance(name, str)
+        return width, name
+
+    def init(self, width, name):
+        self.width = width
+        self.name = name
+
+    def rebuild(self, rebuilder):
+        return rebuilder(
+            type(self),
+            self.width,
+            self.name,
+        )
+
+    def __str__(self):
+        return self.name
+
+
 class SemaExprBinBase(SemaExpr):
-    def __init__(self, va, vb):
+    @classmethod
+    def validate_args(cls, va, vb):
         if isinstance(va, int):
             assert isinstance(vb, SemaExpr)
             va = SemaConst(vb.width, va)
@@ -129,6 +186,9 @@ class SemaExprBinBase(SemaExpr):
             vb = SemaConst(va.width, vb)
         assert isinstance(vb, SemaExpr)
         assert va.width == vb.width
+        return va, vb
+
+    def init(self, va, vb):
         self.va = va
         self.vb = vb
 
@@ -144,27 +204,40 @@ class SemaExprBinBase(SemaExpr):
 
 
 class SemaExprBin(SemaExprBinBase):
-    def __init__(self, va, vb):
-        super().__init__(va, vb)
+    def init(self, va, vb):
+        super().init(va, vb)
         self.width = self.va.width
 
 
 class SemaExprBinPred(SemaExprBinBase):
-    def __init__(self, va, vb):
-        super().__init__(va, vb)
+    def init(self, va, vb):
+        super().init(va, vb)
         self.width = 1
 
 
 class SemaAdd(SemaExprBin):
     symbol = '+'
+    folders = [
+        ConstFoldBin(operator.add),
+        fold_const_swap,
+        fold_const_reass,
+    ]
 
 
 class SemaSub(SemaExprBin):
     symbol = '-'
+    folders = [
+        ConstFoldBin(operator.sub),
+    ]
 
 
 class SemaMul(SemaExprBin):
     symbol = '*'
+    folders = [
+        ConstFoldBin(operator.mul),
+        fold_const_swap,
+        fold_const_reass,
+    ]
 
 
 class SemaUDiv(SemaExprBin):
@@ -176,7 +249,8 @@ class SemaUMod(SemaExprBin):
 
 
 class SemaAddX(SemaExpr):
-    def __init__(self, va, vb, vc):
+    @classmethod
+    def validate_args(cls, va, vb, vc):
         if isinstance(va, int):
             assert isinstance(vb, SemaExpr)
             va = SemaConst(vb.width, va)
@@ -189,6 +263,9 @@ class SemaAddX(SemaExpr):
             vc = SemaConst(1, vc)
         assert isinstance(vc, SemaExpr)
         assert vc.width == 1
+        return va, vb, vc
+
+    def init(self, va, vb, vc):
         self.va = va
         self.vb = vb
         self.vc = vc
@@ -205,9 +282,23 @@ class SemaAddX(SemaExpr):
     def __str__(self):
         return '$addx({}, {}, {})'.format(self.va, self.vb, self.vc)
 
+    def fold_add(cls, va, vb, vc):
+        if isinstance(vc, SemaConst) and vc.val == 0:
+            return va + vb
+
+    def fold_sub(cls, va, vb, vc):
+        if isinstance(vc, SemaConst) and vc.val == 1:
+            return va - ~vb
+
+    folders = [
+        fold_add,
+        fold_sub,
+    ]
+
 
 class SemaAddFBase(SemaExpr):
-    def __init__(self, va, vb, vc):
+    @classmethod
+    def validate_args(cls, va, vb, vc):
         if isinstance(va, int):
             assert isinstance(vb, SemaExpr)
             va = SemaConst(vb.width, va)
@@ -218,6 +309,9 @@ class SemaAddFBase(SemaExpr):
         assert va.width == vb.width
         assert isinstance(vc, SemaExpr)
         assert vc.width == va.width
+        return va, vb, vc
+
+    def init(self, va, vb, vc):
         self.va = va
         self.vb = vb
         self.vc = vc
@@ -231,20 +325,58 @@ class SemaAddFBase(SemaExpr):
             self.vc.rebuild(rebuilder),
         )
 
+    def fold_shorten(cls, va, vb, vc):
+        if va.width != 1:
+            return cls(SemaSF(va), SemaSF(vb), SemaSF(vc))
+
+    folders = [
+        fold_shorten,
+    ]
+
 
 class SemaCF(SemaAddFBase):
     def __str__(self):
         return '$cf({}, {}, {})'.format(self.va, self.vb, self.vc)
+
+    def fold_const(cls, va, vb, vc):
+        assert va.width == 1
+        if isinstance(va, SemaConst) and isinstance(vb, SemaConst) and isinstance(vc, SemaConst):
+            if va.val == 0 and vb.val == 0:
+                res = 0
+            elif va.val == 1 and vb.val == 1:
+                res = 1
+            else:
+                res = vc.val ^ 1
+            return SemaConst(1, res)
+
+    folders = [
+        SemaAddFBase.fold_shorten,
+        fold_const,
+    ]
 
 
 class SemaOF(SemaAddFBase):
     def __str__(self):
         return '$of({}, {}, {})'.format(self.va, self.vb, self.vc)
 
+    def fold_const(cls, va, vb, vc):
+        assert va.width == 1
+        if isinstance(va, SemaConst) and isinstance(vb, SemaConst) and isinstance(vc, SemaConst):
+            return SemaConst(1, int(va.val == vb.val and va.val != vc.val))
+
+    folders = [
+        SemaAddFBase.fold_shorten,
+        fold_const,
+    ]
+
 
 class SemaConcat(SemaExpr):
-    def __init__(self, *vals):
+    @classmethod
+    def validate_args(cls, *vals):
         assert all(isinstance(x, SemaExpr) for x in vals)
+        return vals
+
+    def init(self, *vals):
         self.vals = vals
         self.width = sum(x.width for x in vals)
 
@@ -260,15 +392,42 @@ class SemaConcat(SemaExpr):
     def __str__(self):
         return '$concat({})'.format(', '.join(str(val) for val in self.vals))
 
+    def fold_one(cls, *vals):
+        if len(vals) == 1:
+            return vals[0]
+
+    def fold_const(cls, *vals):
+        changed = False
+        res = [vals[0]]
+        for val in vals[1:]:
+            if isinstance(val, SemaConst) and isinstance(res[-1], SemaConst):
+                shift = res[-1].width
+                res[-1] = SemaConst(shift + val.width, val.val << shift | res[-1].val)
+                changed = True
+            else:
+                res.append(val)
+        if changed:
+            return SemaConcat(*res)
+
+    folders = [
+        fold_const,
+        fold_one,
+    ]
+
+
 
 class SemaExtr(SemaExpr):
-    def __init__(self, val, start, width):
+    @classmethod
+    def validate_args(cls, val, start, width):
         assert isinstance(val, SemaExpr)
         assert isinstance(start, int)
         assert isinstance(width, int)
         assert start >= 0
         assert width >= 0
         assert start + width <= val.width
+        return val, start, width
+
+    def init(self, val, start, width):
         self.val = val
         self.start = start
         self.width = width
@@ -284,13 +443,25 @@ class SemaExtr(SemaExpr):
     def __str__(self):
         return '$extr({}, {}, {})'.format(self.val, self.start, self.width)
 
+    def fold_const(cls, val, start, width):
+        if isinstance(val, SemaConst):
+            return SemaConst(width, val.val >> start)
+
+    folders = [
+        fold_const
+    ]
+
 
 class SemaSExt(SemaExpr):
-    def __init__(self, val, width):
+    @classmethod
+    def validate_args(cls, val, width):
         assert isinstance(val, SemaExpr)
         assert isinstance(width, int)
         assert width >= 0
         assert val.width <= width
+        return val, width
+
+    def init(self, val, width):
         self.val = val
         self.width = width
 
@@ -308,21 +479,43 @@ class SemaSExt(SemaExpr):
 class SemaAnd(SemaExprBin):
     symbol = '&'
 
+    folders = [
+        ConstFoldBin(operator.and_),
+        fold_const_swap,
+        fold_const_reass,
+    ]
+
 
 class SemaOr(SemaExprBin):
     symbol = '|'
+
+    folders = [
+        ConstFoldBin(operator.or_),
+        fold_const_swap,
+        fold_const_reass,
+    ]
 
 
 class SemaXor(SemaExprBin):
     symbol = '^'
 
+    folders = [
+        ConstFoldBin(operator.xor),
+        fold_const_swap,
+        fold_const_reass,
+    ]
+
 
 class SemaExprShift(SemaExprBinBase):
-    def __init__(self, va, vb):
+    @classmethod
+    def validate_args(cls, va, vb):
         assert isinstance(va, SemaExpr)
         if isinstance(vb, int):
             vb = SemaConst(va.width, vb)
         assert isinstance(vb, SemaExpr)
+        return va, vb
+
+    def init(self, va, vb):
         self.va = va
         self.vb = vb
         self.width = va.width
@@ -331,9 +524,17 @@ class SemaExprShift(SemaExprBinBase):
 class SemaShl(SemaExprShift):
     symbol = '<<'
 
+    folders = [
+        ConstFoldBin(operator.lshift),
+    ]
+
 
 class SemaShr(SemaExprShift):
     symbol = '>>'
+
+    folders = [
+        ConstFoldBin(operator.rshift),
+    ]
 
 
 class SemaSar(SemaExprShift):
@@ -342,6 +543,11 @@ class SemaSar(SemaExprShift):
 
 class SemaEq(SemaExprBinPred):
     symbol = '=='
+
+    folders = [
+        ConstFoldBinPred(operator.eq),
+        fold_const_swap,
+    ]
 
 
 def SemaSF(val):

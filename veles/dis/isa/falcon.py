@@ -29,7 +29,7 @@ from ..mem import MemSpace
 from ..special import SpecialMode, Special, SpecialHalt, Syscall
 from ..sema import (
     SemaVar, SemaConst, SemaConcat, SemaExtr, SemaSF, SemaAddX, SemaOF, SemaCF,
-    SemaSar, SemaSExt, SemaZExt, SemaUDiv, SemaUMod,
+    SemaSar, SemaSExt, SemaZExt, SemaUDiv, SemaUMod, SemaEq,
     SemaSet, SemaReadReg, SemaWriteReg, SemaReadArg, SemaWriteArg, SemaSpecial,
     SemaIfElse, SemaLoad, SemaStore, SemaSpecialHalt, SemaSyscall, SemaIf,
     SemaReadAnchor,
@@ -310,7 +310,7 @@ class FalconSema:
             SemaWriteReg(FalconArch.reg_ccc, SemaCF(src1, src2, dst) ^ is_sub),
             SemaWriteReg(FalconArch.reg_cco, SemaOF(src1, src2, dst)),
             SemaWriteReg(FalconArch.reg_ccs, SemaSF(dst)),
-            SemaWriteReg(FalconArch.reg_ccz, dst == 0),
+            SemaWriteReg(FalconArch.reg_ccz, SemaEq(dst, 0)),
         ]
         return res
 
@@ -323,7 +323,7 @@ class FalconSema:
             SemaReadArg(src2, 1),
             SemaSet(dst, src1 - src2),
             SemaWriteReg(FalconArch.reg_ccc, ~SemaCF(src1, ~src2, dst)),
-            SemaWriteReg(FalconArch.reg_ccz, dst == 0),
+            SemaWriteReg(FalconArch.reg_ccz, SemaEq(dst, 0)),
         ]
 
     def cmps(width):
@@ -335,7 +335,7 @@ class FalconSema:
             SemaReadArg(src2, 1),
             SemaSet(dst, src1 - src2),
             SemaWriteReg(FalconArch.reg_ccc, SemaOF(src1, ~src2, dst) ^ SemaSF(dst)),
-            SemaWriteReg(FalconArch.reg_ccz, dst == 0),
+            SemaWriteReg(FalconArch.reg_ccz, SemaEq(dst, 0)),
         ]
 
     def shl(width, dst, as1, as2):
@@ -347,7 +347,7 @@ class FalconSema:
             SemaReadArg(src1, as1),
             SemaReadArg(src2, as2),
             SemaWriteArg(dst, src1 << shcnt),
-            SemaIfElse(shcnt == 0, [
+            SemaIfElse(SemaEq(shcnt, 0), [
                 SemaWriteReg(FalconArch.reg_ccc, 0)
             ], [
                 SemaWriteReg(FalconArch.reg_ccc, SemaExtr(src1 >> (src1.width - shcnt), 0, 1))
@@ -364,7 +364,7 @@ class FalconSema:
             SemaReadArg(src1, as1),
             SemaReadArg(src2, as2),
             SemaReadReg(cin, FalconArch.reg_ccc),
-            SemaIfElse(shcnt == 0, [
+            SemaIfElse(SemaEq(shcnt, 0), [
                 SemaWriteArg(dst, src1 << shcnt),
                 SemaWriteReg(FalconArch.reg_ccc, 0)
             ], [
@@ -382,7 +382,7 @@ class FalconSema:
             SemaReadArg(src1, as1),
             SemaReadArg(src2, as2),
             SemaWriteArg(dst, src1 >> shcnt),
-            SemaIfElse(shcnt == 0, [
+            SemaIfElse(SemaEq(shcnt, 0), [
                 SemaWriteReg(FalconArch.reg_ccc, 0)
             ], [
                 SemaWriteReg(FalconArch.reg_ccc, SemaExtr(src1 >> (shcnt - 1), 0, 1))
@@ -399,7 +399,7 @@ class FalconSema:
             SemaReadArg(src1, as1),
             SemaReadArg(src2, as2),
             SemaReadReg(cin, FalconArch.reg_ccc),
-            SemaIfElse(shcnt == 0, [
+            SemaIfElse(SemaEq(shcnt, 0), [
                 SemaWriteArg(dst, src1 >> shcnt),
                 SemaWriteReg(FalconArch.reg_ccc, 0),
             ], [
@@ -417,7 +417,7 @@ class FalconSema:
             SemaReadArg(src1, as1),
             SemaReadArg(src2, as2),
             SemaWriteArg(dst, SemaSar(src1, shcnt)),
-            SemaIfElse(shcnt == 0, [
+            SemaIfElse(SemaEq(shcnt, 0), [
                 SemaWriteReg(FalconArch.reg_ccc, 0)
             ], [
                 SemaWriteReg(FalconArch.reg_ccc, SemaExtr(src1 >> (shcnt - 1), 0, 1))
@@ -433,7 +433,7 @@ class FalconSema:
             SemaWriteArg(ad, dst),
             SemaWriteReg(FalconArch.reg_cco, 0),
             SemaWriteReg(FalconArch.reg_ccs, SemaSF(dst)),
-            SemaWriteReg(FalconArch.reg_ccz, dst == 0),
+            SemaWriteReg(FalconArch.reg_ccz, SemaEq(dst, 0)),
         ]
 
     def neg(width, ad, as1):
@@ -445,7 +445,7 @@ class FalconSema:
             SemaWriteArg(ad, dst),
             SemaWriteReg(FalconArch.reg_cco, SemaOF(0, ~src, dst)),
             SemaWriteReg(FalconArch.reg_ccs, SemaSF(dst)),
-            SemaWriteReg(FalconArch.reg_ccz, dst == 0),
+            SemaWriteReg(FalconArch.reg_ccz, SemaEq(dst, 0)),
         ]
 
     def mov(width, dst, src):
@@ -464,7 +464,7 @@ class FalconSema:
             SemaWriteArg(ad, dst),
             SemaWriteReg(FalconArch.reg_cco, 0),
             SemaWriteReg(FalconArch.reg_ccs, SemaSF(dst)),
-            SemaWriteReg(FalconArch.reg_ccz, dst == 0),
+            SemaWriteReg(FalconArch.reg_ccz, SemaEq(dst, 0)),
         ]
 
     def tst(width):
@@ -473,7 +473,7 @@ class FalconSema:
             SemaReadArg(src, 0),
             SemaWriteReg(FalconArch.reg_cco, 0),
             SemaWriteReg(FalconArch.reg_ccs, SemaSF(src)),
-            SemaWriteReg(FalconArch.reg_ccz, src == 0),
+            SemaWriteReg(FalconArch.reg_ccz, SemaEq(src, 0)),
         ]
 
     # Unsized instructions start here.
@@ -508,7 +508,7 @@ class FalconSema:
             SemaWriteReg(FalconArch.reg_ccc, 0),
             SemaWriteReg(FalconArch.reg_cco, 0),
             SemaWriteReg(FalconArch.reg_ccs, SemaSF(dst)),
-            SemaWriteReg(FalconArch.reg_ccz, dst == 0),
+            SemaWriteReg(FalconArch.reg_ccz, SemaEq(dst, 0)),
         ]
 
     def or_(ad, as1, as2):
@@ -523,7 +523,7 @@ class FalconSema:
             SemaWriteReg(FalconArch.reg_ccc, 0),
             SemaWriteReg(FalconArch.reg_cco, 0),
             SemaWriteReg(FalconArch.reg_ccs, SemaSF(dst)),
-            SemaWriteReg(FalconArch.reg_ccz, dst == 0),
+            SemaWriteReg(FalconArch.reg_ccz, SemaEq(dst, 0)),
         ]
 
     def xor_(ad, as1, as2):
@@ -538,7 +538,7 @@ class FalconSema:
             SemaWriteReg(FalconArch.reg_ccc, 0),
             SemaWriteReg(FalconArch.reg_cco, 0),
             SemaWriteReg(FalconArch.reg_ccs, SemaSF(dst)),
-            SemaWriteReg(FalconArch.reg_ccz, dst == 0),
+            SemaWriteReg(FalconArch.reg_ccz, SemaEq(dst, 0)),
         ]
 
     def t_extr(dst, src1, low, sizem1, has_sign):
@@ -551,7 +551,7 @@ class FalconSema:
             ], [
                 SemaWriteArg(dst, res)
             ]),
-            SemaWriteReg(FalconArch.reg_ccz, res == 0),
+            SemaWriteReg(FalconArch.reg_ccz, SemaEq(res, 0)),
             SemaWriteReg(FalconArch.reg_ccs, sign)
         ]
 
@@ -617,7 +617,7 @@ class FalconSema:
         return [
             SemaReadArg(src1, 1),
             SemaReadArg(src2, 2),
-            SemaIfElse(src2 == 0, [
+            SemaIfElse(SemaEq(src2, 0), [
                 SemaWriteArg(0, SemaConst(32, 0xffffffff)),
             ], [
                 SemaWriteArg(0, SemaUDiv(src1, src2)),
@@ -630,7 +630,7 @@ class FalconSema:
         return [
             SemaReadArg(src1, 1),
             SemaReadArg(src2, 2),
-            SemaIfElse(src2 == 0, [
+            SemaIfElse(SemaEq(src2, 0), [
                 SemaWriteArg(0, src1),
             ], [
                 SemaWriteArg(0, SemaUMod(src1, src2)),
@@ -787,7 +787,7 @@ class FalconSema:
         return [
             SemaReadArg(src, 1),
             SemaWriteArg(0, SemaZExt(src, 32)),
-            SemaWriteReg(FalconArch.reg_ccz, src == 0),
+            SemaWriteReg(FalconArch.reg_ccz, SemaEq(src, 0)),
             SemaWriteReg(FalconArch.reg_ccs, 0),
         ]
 
