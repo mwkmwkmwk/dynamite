@@ -67,6 +67,11 @@ def fold_const_reass(cls, va, vb):
         return cls(va.va, cls(va.vb, vb))
 
 
+def fold_const_zero(cls, va, vb):
+    if isinstance(vb, SemaConst) and vb.val == 0:
+        return va
+
+
 class SemaExpr:
     folders = []
 
@@ -219,6 +224,7 @@ class SemaAdd(SemaExprBin):
     symbol = '+'
     folders = [
         ConstFoldBin(operator.add),
+        fold_const_zero,
         fold_const_swap,
         fold_const_reass,
     ]
@@ -226,8 +232,15 @@ class SemaAdd(SemaExprBin):
 
 class SemaSub(SemaExprBin):
     symbol = '-'
+
+    def fold_rconst(cls, va, vb):
+        if isinstance(vb, SemaConst):
+            return va + SemaConst(vb.width, -vb.val)
+
     folders = [
         ConstFoldBin(operator.sub),
+        fold_const_zero,
+        fold_rconst,
     ]
 
 
@@ -500,6 +513,7 @@ class SemaOr(SemaExprBin):
 
     folders = [
         ConstFoldBin(operator.or_),
+        fold_const_zero,
         fold_const_swap,
         fold_const_reass,
         fold_same,
@@ -515,6 +529,7 @@ class SemaXor(SemaExprBin):
 
     folders = [
         ConstFoldBin(operator.xor),
+        fold_const_zero,
         fold_const_swap,
         fold_const_reass,
         fold_same,
@@ -539,21 +554,58 @@ class SemaExprShift(SemaExprBinBase):
 class SemaShl(SemaExprShift):
     symbol = '<<'
 
+    def fold_rconst(cls, va, vb):
+        if isinstance(vb, SemaConst):
+            if vb.val >= va.width:
+                return SemaConst(va.width, 0)
+            if vb.val == 0:
+                return va
+            return SemaConcat(
+                SemaConst(vb.val, 0),
+                SemaExtr(va, 0, va.width - vb.val)
+            )
+
     folders = [
-        ConstFoldBin(operator.lshift),
+        fold_rconst,
     ]
 
 
 class SemaShr(SemaExprShift):
     symbol = '>>'
 
+    def fold_rconst(cls, va, vb):
+        if isinstance(vb, SemaConst):
+            if vb.val >= va.width:
+                return SemaConst(va.width, 0)
+            if vb.val == 0:
+                return va
+            return SemaZExt(
+                SemaExtr(va, vb.val, va.width - vb.val),
+                va.width
+            )
+
     folders = [
-        ConstFoldBin(operator.rshift),
+        fold_rconst,
     ]
 
 
 class SemaSar(SemaExprShift):
     symbol = '>>.s'
+
+    def fold_rconst(cls, va, vb):
+        if isinstance(vb, SemaConst):
+            if vb.val >= va.width:
+                return SemaConst(va.width, 0)
+            if vb.val == 0:
+                return va
+            return SemaSExt(
+                SemaExtr(va, vb.val, va.width - vb.val),
+                va.width
+            )
+
+    folders = [
+        fold_rconst,
+    ]
 
 
 class SemaEq(SemaExprBinPred):

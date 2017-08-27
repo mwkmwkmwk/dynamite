@@ -79,16 +79,14 @@ class BlockConstructor:
     def write_reg(self, cond, reg, val):
         assert reg.width == val.width
         if isinstance(reg, (Register, RegisterSP, RegisterObservable, RegisterSpecial)):
-            ov = self.read_reg(reg)
+            res, ov = self.read_reg(reg)
             if cond is not None:
                 self.regstate[reg.name] = SemaSlct(cond, val, ov)
             else:
                 self.regstate[reg.name] = val
             if isinstance(reg, RegisterObservable) and ov != val:
-                return [
-                    SemaWriteReg(reg, val),
-                ]
-            return []
+                res.append(SemaWriteReg(reg, val))
+            return res
         elif isinstance(reg, RegisterPC):
             if cond is not None:
                 if self.nextpc is None:
@@ -146,8 +144,8 @@ class BlockConstructor:
                 res += self.write_reg(cond, op.dst, op.src.rebuild(rebuilder_var))
             elif isinstance(op, SemaIfElse):
                 cur_cond = op.cond.rebuild(rebuilder_var)
-                if isinstance(cond, SemaConst):
-                    if cond.val:
+                if isinstance(cur_cond, SemaConst):
+                    if cur_cond.val:
                         self.trans_sema(op.opsp, prefix, cond, vstate),
                     else:
                         self.trans_sema(op.opsn, prefix, cond, vstate),
@@ -162,7 +160,8 @@ class BlockConstructor:
                         self.trans_sema(op.opsp, prefix, condp, vstate),
                         self.trans_sema(op.opsn, prefix, condn, vstate),
                     )
-                    res.append(op)
+                    if op.opsp or op.opsn:
+                        res.append(op)
             else:
                 op = op.rebuild(rebuilder_var)
                 res.append(op)
