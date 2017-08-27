@@ -479,30 +479,45 @@ class SemaSExt(SemaExpr):
 class SemaAnd(SemaExprBin):
     symbol = '&'
 
+    def fold_same(cls, va, vb):
+        if va == vb:
+            return va
+
     folders = [
         ConstFoldBin(operator.and_),
         fold_const_swap,
         fold_const_reass,
+        fold_same,
     ]
 
 
 class SemaOr(SemaExprBin):
     symbol = '|'
 
+    def fold_same(cls, va, vb):
+        if va == vb:
+            return va
+
     folders = [
         ConstFoldBin(operator.or_),
         fold_const_swap,
         fold_const_reass,
+        fold_same,
     ]
 
 
 class SemaXor(SemaExprBin):
     symbol = '^'
 
+    def fold_same(cls, va, vb):
+        if va == vb:
+            return SemaConst(va.width, 0)
+
     folders = [
         ConstFoldBin(operator.xor),
         fold_const_swap,
         fold_const_reass,
+        fold_same,
     ]
 
 
@@ -548,6 +563,49 @@ class SemaEq(SemaExprBinPred):
         ConstFoldBinPred(operator.eq),
         fold_const_swap,
     ]
+
+
+class SemaSlct(SemaExpr):
+    @classmethod
+    def validate_args(cls, cond, va, vb):
+        assert isinstance(cond, SemaExpr)
+        assert cond.width == 1
+        assert isinstance(va, SemaExpr)
+        if isinstance(vb, int):
+            vb = SemaConst(va.width, vb)
+        assert isinstance(vb, SemaExpr)
+        assert va.width == vb.width
+        return cond, va, vb
+
+    def init(self, cond, va, vb):
+        self.cond = cond
+        self.va = va
+        self.vb = vb
+        self.width = va.width
+
+    def rebuild(self, rebuilder):
+        return rebuilder(
+            type(self),
+            self.cond.rebuild(rebuilder),
+            self.va.rebuild(rebuilder),
+            self.vb.rebuild(rebuilder),
+        )
+
+    def fold_const(cls, cond, va, vb):
+        if isinstance(cond, SemaConst):
+            return va if cond.val else vb
+
+    def fold_same(cls, cond, va, vb):
+        if va == vb:
+            return va
+
+    folders = [
+        fold_const,
+        fold_same,
+    ]
+
+    def __str__(self):
+        return '({} ? {} : {})'.format(self.cond, self.va, self.vb)
 
 
 def SemaSF(val):

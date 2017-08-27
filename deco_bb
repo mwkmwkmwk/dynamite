@@ -26,7 +26,7 @@ from veles.data.bindata import BinData
 from veles.dis.isa.falcon import FalconIsa
 from veles.dis.sema import (
     SemaList, SemaSet, SemaReadReg, SemaWriteReg, SemaIfElse,
-    SemaExtr, SemaConst, SemaVar,
+    SemaExtr, SemaConst, SemaVar, SemaSlct
 )
 from veles.dis.reg import (
     Register, RegisterSP, RegisterPC, RegisterObservable, RegisterSplit, SubRegister,
@@ -145,12 +145,24 @@ class BlockConstructor:
             elif isinstance(op, SemaWriteReg):
                 res += self.write_reg(cond, op.dst, op.src.rebuild(rebuilder_var))
             elif isinstance(op, SemaIfElse):
-                op = SemaIfElse(
-                    op.cond,
-                    self.trans_sema(op.opsp, prefix, cond & op.cond, vstate),
-                    self.trans_sema(op.opsp, prefix, cond & ~op.cond, vstate),
-                )
-                res.append(op)
+                cur_cond = op.cond.rebuild(rebuilder_var)
+                if isinstance(cond, SemaConst):
+                    if cond.val:
+                        self.trans_sema(op.opsp, prefix, cond, vstate),
+                    else:
+                        self.trans_sema(op.opsn, prefix, cond, vstate),
+                else:
+                    condp = cur_cond
+                    condn = ~cur_cond
+                    if cond is not None:
+                        condp &= cond
+                        condn &= cond
+                    op = SemaIfElse(
+                        cur_cond,
+                        self.trans_sema(op.opsp, prefix, condp, vstate),
+                        self.trans_sema(op.opsn, prefix, condn, vstate),
+                    )
+                    res.append(op)
             else:
                 op = op.rebuild(rebuilder_var)
                 res.append(op)
