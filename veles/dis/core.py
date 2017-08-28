@@ -86,6 +86,7 @@ class Isa:
         # to pos.
         res = IsaParseResult(base, pos)
         s = ParseState(res, data, data_base, pos)
+        res.start = s.pos
         for x in self.parser:
             x.parse(s)
         res.end = s.pos
