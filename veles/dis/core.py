@@ -62,6 +62,7 @@ class IsaParseResult:
         self.len = None
         self.sema = SemaList()
         self.anchors = {}
+        self.end = None
 
 
 class Isa:
@@ -87,6 +88,7 @@ class Isa:
         s = ParseState(res, data, data_base, pos)
         for x in self.parser:
             x.parse(s)
+        res.end = s.pos
         def rebuilder_anchor(cls, *args):
             if cls is SemaReadAnchor:
                 dst, anchor = args
