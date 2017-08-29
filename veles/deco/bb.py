@@ -1,6 +1,6 @@
 from veles.dis.sema import (
     SemaList, SemaSet, SemaReadReg, SemaWriteReg, SemaIfElse,
-    SemaExtr, SemaConst, SemaVar, SemaSlct
+    SemaExtr, SemaConst, SemaVar, SemaSlct, SemaUnkOp, SemaSpecialHalt
 )
 from veles.dis.reg import (
     Register, RegisterSP, RegisterPC, RegisterObservable, RegisterSplit, SubRegister,
@@ -9,34 +9,41 @@ from veles.dis.reg import (
 
 
 class BasicBlock:
-    def __init__(self, regstate, data, data_base, base, isa, start, end):
-        self.regstate = regstate
+    def __init__(self, regstate, data, data_base, base, isa, start, stops):
+        self.isa = isa
+        self.regstate = dict(regstate)
         self.sema = SemaList()
         self.nextpc = None
         self.tmp_counter = 0
         self.insns = []
+        self.halted = False
+        self.start = start
         pos = start
-        while end is None or pos < end:
+        while True:
             res = isa.parse(data, data_base, base, pos)
             self.insns.append(res)
             if res.desync:
-                break
+                self.sema.append(SemaUnkOp())
+                return
             self.process_insn(res, 'insn_{:x}'.format(pos))
             pos += res.len
+            if self.halted:
+                return
             if self.nextpc is not None:
-                break
-        if self.nextpc is None:
-            self.fill_nextpc()
+                return
+            if pos in stops:
+                self.fill_nextpc()
+                return
 
     def get_tmp(self, width):
-        res = SemaVar(width, 'tmp_{}'.format(self.tmp_counter))
+        res = SemaVar(width, 'tmp_{:x}_{}'.format(self.start, self.tmp_counter))
         self.tmp_counter += 1
         return res
 
     def fill_nextpc(self):
         if self.nextpc is None:
             if self.cur_insn.base is None:
-                self.nextpc = self.cur_insn.end
+                self.nextpc = SemaConst(self.isa.pc_width, self.cur_insn.end)
             else:
                 self.nextpc = self.cur_insn.base + self.cur_insn.end
 
@@ -151,6 +158,8 @@ class BasicBlock:
             else:
                 op = op.rebuild(rebuilder_var)
                 res.append(op)
+                if isinstance(op, SemaSpecialHalt) and cond is None:
+                    self.halted = True
         return res
 
     def process_insn(self, insn, prefix):

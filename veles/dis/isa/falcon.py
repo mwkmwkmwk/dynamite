@@ -1841,5 +1841,7 @@ class FalconIsa(Isa):
         ParseAnchor(FalconArch.anchor_end),
     ]
 
+    pc_width = 32
+
 # Somebody's out to break you
 # Hiding in narrows - poison arrows

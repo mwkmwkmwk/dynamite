@@ -32,7 +32,7 @@ base = None
 isa = FalconIsa()
 
 def do_bb(name, start, end):
-    bb = BasicBlock({}, data, base, None, isa, start, end)
+    bb = BasicBlock({}, data, base, None, isa, start, set() if end is None else {end})
     print("BB {}:".format(name))
     for insn in bb.insns:
         if args.print_assembly or args.print_assembly_sema:

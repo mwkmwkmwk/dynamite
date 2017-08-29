@@ -1,0 +1,124 @@
+#!/usr/bin/env python3
+
+# Copyright 2017 CodiLime
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import argparse
+
+parser = argparse.ArgumentParser(description='Decompile a list of functions.')
+parser.add_argument('file', help='the input file')
+parser.add_argument('-a', '--print-assembly', action='store_true', help='print the assembly insns')
+args = parser.parse_args()
+
+from veles.data.bindata import BinData
+from veles.dis.isa.falcon import FalconIsa
+from veles.deco.tree import DecoTree, FinishHalt, FinishUnk, FinishBlock, FinishCond
+
+data = None
+base = None
+
+isa = FalconIsa()
+
+def print_finish(indent, finish):
+    ind = '    ' * indent
+    if isinstance(finish, FinishHalt):
+        print('{}Halt'.format(ind))
+    elif isinstance(finish, FinishBlock):
+        print('{}goto block_{:x}'.format(ind, finish.block.pos))
+    elif isinstance(finish, FinishCond):
+        print('{}if ({}) {{'.format(ind, finish.cond))
+        print_finish(indent + 1, finish.finp)
+        print('{}}} else {{'.format(ind))
+        print_finish(indent + 1, finish.finn)
+        print('{}}}'.format(ind))
+    elif isinstance(finish, FinishUnk):
+        print('{}goto *{}'.format(ind, finish.nextpc))
+    else:
+        print('{}???'.format(ind))
+
+def print_bb(indent, block):
+    ind = '    ' * indent
+    print('{}block_{:x}:'.format(ind, block.pos))
+    if block.bb is None:
+        print('{}INVALID'.format(ind))
+        print()
+    else:
+        for reg in block.phi_regs:
+            print('{}phi_{:x}_{} = ${}'.format(ind, block.pos, reg, reg))
+        if args.print_assembly:
+            for insn in block.bb.insns:
+                print('{}{:08x} {:18} {}'.format(ind, insn.start, ' '.join(format(x, '02x') for x in data[insn.start:insn.end]), (' '*28 + '\n').join(str(x) for x in insn.insns)))
+            print()
+        print(block.bb.sema.str(indent))
+        for reg, val in block.bb.regstate.items():
+            print('{}${} = {}'.format(ind, reg, val))
+        print_finish(indent, block.finish)
+        print()
+        for child in block.children:
+            print_bb(indent + 1, child)
+
+def do_fun(name, start):
+    tree = DecoTree(data, base, None, isa, start, {})
+    print('Function {}:'.format(name))
+    print_bb(1, tree.root)
+    print('ORPHANS', tree.orphans)
+
+fun_name = None
+fun_start = None
+
+def flush_fun():
+    global fun_name, fun_start
+    if fun_name is None:
+        return
+    do_fun(fun_name, fun_start)
+    fun_name = None
+    fun_start = None
+
+with open(args.file) as f:
+    for l in f:
+        l, _, _ = l.partition('#')
+        p = l.split()
+        if not p:
+            continue
+        cmd = p[0]
+        if data is None:
+            if cmd != 'file':
+                raise ValueError('Expecting a file command')
+            if len(p) not in {2, 3, 5}:
+                raise ValueError('File command needs 1, 2, or 4 arguments')
+            if len(p) > 2:
+                base = int(p[2], 16)
+            else:
+                base = 0
+            with open(p[1], "rb") as df:
+                if len(p) > 3:
+                    df.seek(int(p[3], 16))
+                    sz = int(p[4], 16)
+                    data = df.read(sz)
+                    if len(data) != sz:
+                        raise ValueError('not enough data in the file')
+                else:
+                    data = df.read()
+                data = BinData(8, data)
+        else:
+            if cmd == 'fun':
+                flush_fun()
+                if len(p) != 3:
+                    raise ValueError('fun command needs 2 arguments')
+                fun_name = p[1]
+                fun_start = int(p[2], 16)
+            else:
+                raise ValueError('Unknown command "{}"'.format(cmd))
+
+flush_fun()
