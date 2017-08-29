@@ -50,7 +50,10 @@ def print_finish(indent, finish):
 
 def print_bb(indent, block):
     ind = '    ' * indent
-    print('{}block_{:x}:'.format(ind, block.pos))
+    if block.front:
+        print('{}block_{:x} [FRONT {}]:'.format(ind[4:], block.pos, ', '.join('block_{:x}'.format(x.pos) for x in block.front)))
+    else:
+        print('{}block_{:x}:'.format(ind[4:], block.pos))
     if block.bb is None:
         print('{}INVALID'.format(ind))
         print()
@@ -66,8 +69,16 @@ def print_bb(indent, block):
             print('{}${} = {}'.format(ind, reg, val))
         print_finish(indent, block.finish)
         print()
-        for child in block.children:
-            print_bb(indent + 1, child)
+        for scc in block.child_sccs:
+            if len(scc.nodes) == 1:
+                print_bb(indent + 1, scc.nodes[0])
+            else:
+                if scc.front:
+                    print('{}unnatural loop [FRONT {}]:'.format(ind, ', '.join('block_{:x}'.format(x.pos) for x in scc.front)))
+                else:
+                    print('{}unnatural loop:'.format(ind))
+                for node in scc.nodes:
+                    print_bb(indent + 2, node)
 
 def do_fun(name, start):
     tree = DecoTree(data, base, None, isa, start, {}, debug=args.debug)

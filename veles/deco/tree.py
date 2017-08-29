@@ -128,6 +128,59 @@ class TreeBlock:
                 new_front.append(block)
         self.front = new_front
 
+    def post_process_sort(self):
+        for child in self.children:
+            child.post_process_sort()
+        self.child_sccs = []
+        index = {}
+        stack = []
+        ctr = 0
+        if self.tree.debug:
+            print('SCC BEGIN {:x}'.format(self.pos))
+
+        def make_scc(block):
+            nonlocal ctr
+            if self.tree.debug:
+                print('SCC ENTER {:x} {} [{}]'.format(block.pos, ctr, ', '.join(hex(x.pos) for x in stack)))
+            index[block] = lowlink = ctr
+            ctr += 1
+            stack.append(block)
+            for dst in block.front:
+                if dst in self.children:
+                    if dst not in index:
+                        lowlink = min(lowlink, make_scc(dst))
+                    elif dst in stack:
+                        lowlink = min(lowlink, index[dst])
+            if lowlink == index[block]:
+                idx = stack.index(block)
+                nodes = stack[idx:]
+                del stack[idx:]
+                if self.tree.debug:
+                    print('SCC TRIGGER {} [{}]'.format(', '.join(hex(x.pos) for x in nodes), ', '.join(hex(x.pos) for x in stack)))
+                scc = TreeScc(self, nodes)
+                for node in nodes:
+                    node.scc = scc
+                self.child_sccs.append(scc)
+            if self.tree.debug:
+                print('SCC EXIT {:x}'.format(block.pos))
+            return lowlink
+
+        for child in self.children:
+            if child not in index:
+                make_scc(child)
+        self.child_sccs.reverse()
+
+
+class TreeScc:
+    def __init__(self, parent, nodes):
+        self.parent = parent
+        self.nodes = nodes
+        self.front = []
+        for node in nodes:
+            for dst in node.front:
+                if dst not in self.front:
+                    self.front.append(dst)
+
 
 class DecoTree:
     def __init__(self, data, data_base, base, isa, entry_pos, regstate, debug=False):
@@ -181,10 +234,12 @@ class DecoTree:
                         self.edge_queue.append((dst, block, None))
                 block = src
                 while block != dst.parent:
-                    block.front.append(dst)
+                    if dst not in block.front:
+                        block.front.append(dst)
                     block = block.parent
             for block in self.invalidate_queue:
                 block.invalidate()
+        self.root.post_process_sort()
 
     def do_edge(self, src, dstpos, regstate):
         if dstpos not in self.blocks:
