@@ -29,7 +29,7 @@ from ..mem import MemSpace
 from ..special import SpecialMode, Special, SpecialHalt, Syscall
 from ..sema import (
     SemaVar, SemaConst, SemaConcat, SemaExtr, SemaSF, SemaAddX, SemaOF, SemaCF,
-    SemaSar, SemaSExt, SemaZExt, SemaUDiv, SemaUMod, SemaEq,
+    SemaSar, SemaSExt, SemaZExt, SemaUDiv, SemaUMod, SemaEq, SemaSlct,
     SemaSet, SemaReadReg, SemaWriteReg, SemaReadArg, SemaWriteArg, SemaSpecial,
     SemaIfElse, SemaLoad, SemaStore, SemaSpecialHalt, SemaSyscall, SemaIf,
     SemaReadAnchor,
@@ -544,13 +544,13 @@ class FalconSema:
     def t_extr(dst, src1, low, sizem1, has_sign):
         res = src1 >> low & ((SemaConst(32, 2) << sizem1) - 1)
         signbit = low + sizem1
-        sign = SemaExtr(src1 >> signbit, 0, 1) & has_sign
+        if has_sign:
+            sign = SemaExtr(src1 >> signbit, 0, 1)
+            res = SemaSlct(sign, res | -(SemaConst(32, 2) << sizem1), res)
+        else:
+            sign = SemaConst(1, 0)
         return [
-            SemaIfElse(sign, [
-                SemaWriteArg(dst, res | -(SemaConst(32, 2) << sizem1))
-            ], [
-                SemaWriteArg(dst, res)
-            ]),
+            SemaWriteArg(dst, res),
             SemaWriteReg(FalconArch.reg_ccz, SemaEq(res, 0)),
             SemaWriteReg(FalconArch.reg_ccs, sign)
         ]

@@ -788,7 +788,7 @@ class SemaSpecial(SemaOp):
             str(x) for x in self.ins
         ]))
         if self.outs:
-            res = ', '.join([str(x) for x in self.outs]) + res
+            res = ', '.join([str(x) for x in self.outs]) + ' = ' + res
         return res
 
 

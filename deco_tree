@@ -19,6 +19,7 @@ import argparse
 parser = argparse.ArgumentParser(description='Decompile a list of functions.')
 parser.add_argument('file', help='the input file')
 parser.add_argument('-a', '--print-assembly', action='store_true', help='print the assembly insns')
+parser.add_argument('-d', '--debug', action='store_true', help='print tree construction debug')
 args = parser.parse_args()
 
 from veles.data.bindata import BinData
@@ -69,7 +70,7 @@ def print_bb(indent, block):
             print_bb(indent + 1, child)
 
 def do_fun(name, start):
-    tree = DecoTree(data, base, None, isa, start, {})
+    tree = DecoTree(data, base, None, isa, start, {}, debug=args.debug)
     print('Function {}:'.format(name))
     print_bb(1, tree.root)
     print('ORPHANS', tree.orphans)

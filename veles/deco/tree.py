@@ -40,20 +40,24 @@ class TreeBlock:
         tree.invalid_roots.add(self)
         if self.parent is not None:
             self.parent.children.append(self)
-            print('CONNECT {} {}'.format(self.parent.pos, self.pos))
+            if self.tree.debug:
+                print('CONNECT {} {}'.format(self.parent.pos, self.pos))
 
     def invalidate(self):
         if not self.valid:
             return
-        print('INVALIDATING {}'.format(self.pos))
+        if self.tree.debug:
+            print('INVALIDATING {}'.format(self.pos))
         for insn in self.bb.insns:
             self.tree.insns[insn.start].remove(self)
             if not self.tree.insns[insn.start]:
                 del self.tree.insns[insn.start]
-        for k, v in self.tree.insns.items():
-            print('{}: {}'.format(k, ', '.join(str(x.pos) for x in v)))
+        if self.tree.debug:
+            for k, v in self.tree.insns.items():
+                print('{}: {}'.format(k, ', '.join(str(x.pos) for x in v)))
         for child in self.children:
-            print('DISCO CHILD {}'.format(child.pos))
+            if self.tree.debug:
+                print('DISCO CHILD {}'.format(child.pos))
             child.invalidate()
             child.parent = None
             self.tree.invalid_roots.remove(child)
@@ -75,7 +79,8 @@ class TreeBlock:
             return FinishUnk(expr)
 
     def process(self):
-        print('GO {} {} {}, {}'.format(self.pos, self.tree.stops, set(self.tree.insns), set(self.tree.blocks)))
+        if self.tree.debug:
+            print('GO {} {} {}, {}'.format(self.pos, self.tree.stops, set(self.tree.insns), set(self.tree.blocks)))
         self.bb = BasicBlock(
             self.regstate_in,
             self.tree.data,
@@ -86,17 +91,20 @@ class TreeBlock:
             self.tree.stops,
         )
         for insn in self.bb.insns:
-            print('INSN {}'.format(insn.start))
+            if self.tree.debug:
+                print('INSN {}'.format(insn.start))
             if insn.start not in self.tree.insns:
                 self.tree.insns[insn.start] = set()
             else:
                 for inv in self.tree.insns[insn.start]:
-                    print('COLLIDE {} {}'.format(self.pos, inv.pos))
+                    if self.tree.debug:
+                        print('COLLIDE {} {}'.format(self.pos, inv.pos))
                     self.tree.invalidate_queue.append(inv)
             self.tree.insns[insn.start].add(self)
-        print('VALIDATED {}'.format(self.pos))
-        for k, v in self.tree.insns.items():
-            print('{}: {}'.format(k, ', '.join(str(x.pos) for x in v)))
+        if self.tree.debug:
+            print('VALIDATED {}'.format(self.pos))
+            for k, v in self.tree.insns.items():
+                print('{}: {}'.format(k, ', '.join(str(x.pos) for x in v)))
         self.outs = []
         if self.bb.nextpc is None:
             self.finish = FinishHalt()
@@ -122,7 +130,7 @@ class TreeBlock:
 
 
 class DecoTree:
-    def __init__(self, data, data_base, base, isa, entry_pos, regstate):
+    def __init__(self, data, data_base, base, isa, entry_pos, regstate, debug=False):
         self.data = data
         self.data_base = data_base
         self.base = base
@@ -134,6 +142,7 @@ class DecoTree:
         self.invalid_roots = set()
         self.orphans = set()
         self.stops = set()
+        self.debug = debug
         self.root = TreeBlock(self, self.entry_pos, None, regstate)
         while self.invalid_roots:
             this_round = self.invalid_roots
@@ -165,7 +174,8 @@ class DecoTree:
                         dst.parent.children.remove(dst)
                         dst.parent = dst.parent.parent
                         dst.parent.children.append(dst)
-                        print('MOVE {} {} [was {}]'.format(dst.parent.pos, dst.pos, old_parent.pos))
+                        if self.debug:
+                            print('MOVE {} {} [was {}]'.format(dst.parent.pos, dst.pos, old_parent.pos))
                         old_parent.recalc_front()
                     for block in dst.front:
                         self.edge_queue.append((dst, block, None))
@@ -185,8 +195,9 @@ class DecoTree:
         else:
             dst = self.blocks[dstpos]
             if dst in self.orphans:
-                print('RECONNECT {} {}'.format(src.pos, dst.pos))
-                print('CHILDREN {}'.format([x.pos for x in dst.children]))
+                if self.debug:
+                    print('RECONNECT {} {}'.format(src.pos, dst.pos))
+                    print('CHILDREN {}'.format([x.pos for x in dst.children]))
                 dst.parent = src
                 dst.regstate_in = regstate
                 dst.regstate_in.update(dst.phi_regs)
