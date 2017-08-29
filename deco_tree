@@ -50,6 +50,14 @@ def print_finish(indent, finish):
 
 def print_bb(indent, block):
     ind = '    ' * indent
+    if block.loop:
+        if block.loop.root is block:
+            print('{}loop_{:x}:'.format(ind[4:], block.pos))
+            print('{}nodes: {}'.format(ind, ', '.join('block_{:x}'.format(x.pos) for x in block.loop.nodes)))
+            print('{}subloops: {}'.format(ind, ', '.join('loop_{:x}'.format(x.root.pos) for x in block.loop.subloops)))
+            print('{}front: {}'.format(ind, ', '.join('block_{:x}'.format(x.pos) for x in block.loop.front)))
+        else:
+            print('{}[in loop_{:x}]'.format(ind[4:], block.loop.root.pos))
     if block.front:
         print('{}block_{:x} [FRONT {}]:'.format(ind[4:], block.pos, ', '.join('block_{:x}'.format(x.pos) for x in block.front)))
     else:

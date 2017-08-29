@@ -170,6 +170,18 @@ class TreeBlock:
                 make_scc(child)
         self.child_sccs.reverse()
 
+    def find_loops(self, loop):
+        while loop is not None and loop.root not in self.front:
+            loop.front.append(self)
+            loop = loop.parent
+        if self in self.front:
+            loop = TreeLoop(self, loop)
+        self.loop = loop
+        if loop is not None:
+            loop.nodes.append(self)
+        for child in self.children:
+            child.find_loops(loop)
+
 
 class TreeScc:
     def __init__(self, parent, nodes):
@@ -180,6 +192,17 @@ class TreeScc:
             for dst in node.front:
                 if dst not in self.front:
                     self.front.append(dst)
+
+
+class TreeLoop:
+    def __init__(self, root, parent):
+        self.root = root
+        self.parent = parent
+        self.nodes = []
+        self.subloops = []
+        self.front = []
+        if parent is not None:
+            parent.subloops.append(self)
 
 
 class DecoTree:
@@ -240,6 +263,7 @@ class DecoTree:
             for block in self.invalidate_queue:
                 block.invalidate()
         self.root.post_process_sort()
+        self.root.find_loops(None)
 
     def do_edge(self, src, dstpos, regstate):
         if dstpos not in self.blocks:
