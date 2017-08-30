@@ -165,7 +165,7 @@ class TreeBlock:
                 print('SCC EXIT {:x}'.format(block.pos))
             return lowlink
 
-        for child in self.children:
+        for child in reversed(self.children):
             if child not in index:
                 make_scc(child)
         self.child_sccs.reverse()
