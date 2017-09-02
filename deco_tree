@@ -66,12 +66,12 @@ def print_bb(indent, block):
         print('{}INVALID'.format(ind))
         print()
     else:
-        for reg in block.phi_regs:
-            print('{}phi_{:x}_{} = ${}'.format(ind, block.pos, reg, reg))
         if args.print_assembly:
             for insn in block.bb.insns:
                 print('{}{:08x} {:18} {}'.format(ind, insn.start, ' '.join(format(x, '02x') for x in data[insn.start:insn.end]), (' '*28 + '\n').join(str(x) for x in insn.insns)))
             print()
+        for reg in block.phi_regs:
+            print('{}phi_{:x}_{} = ${}'.format(ind, block.pos, reg, reg))
         print(block.bb.sema.str(indent))
         for reg, val in block.bb.regstate.items():
             print('{}${} = {}'.format(ind, reg, val))

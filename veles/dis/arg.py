@@ -135,6 +135,7 @@ class ArgPCRel(BaseArg):
                 v |= (1 << (self.width - self.shift)) - (1 << self.field.width)
         v <<= self.shift
         v += dstate.anchors[self.anchor.name]
+        v &= (1 << self.width) - 1
         return IsaSTImm(self.width, v, dstate.base)
 
     def sema_read(self, dstate, var):
