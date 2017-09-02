@@ -21,20 +21,6 @@ from .mem import MemSpace
 from .anchor import Anchor
 from veles.data.repack import Endian
 
-def SemaDef(x):
-    return x
-
-SemaRead = object()
-SemaWrite = object()
-SemaTiedWrite = object()
-
-def SemaTieFirst(x):
-    return x
-
-
-class SemaOp:
-    pass
-
 
 expr_cache = WeakValueDictionary()
 
@@ -675,6 +661,11 @@ def SemaZExt(val, width):
 
 # Here there be ops.
 
+
+class SemaOp:
+    pass
+
+
 class SemaSet(SemaOp):
     def __init__(self, dst, src):
         assert isinstance(dst, SemaVar)
@@ -945,7 +936,7 @@ class SemaLoad(SemaOp):
         )
 
     def str(self, indent):
-        return '{} = {}[{}].{}'.format(self.val, self.mem.name, self.addr, self.endian)
+        return '{} = {}[{}].{}.{}'.format(self.val, self.mem.name, self.addr, self.endian.name, self.width)
 
 
 class SemaStore(SemaOp):
@@ -971,7 +962,7 @@ class SemaStore(SemaOp):
         )
 
     def str(self, indent):
-        return '{}[{}].{} = {}'.format(self.mem.name, self.addr, self.endian, self.val)
+        return '{}[{}].{}.{} = {}'.format(self.mem.name, self.addr, self.endian.name, self.width, self.val)
 
 
 class SemaList(list):
