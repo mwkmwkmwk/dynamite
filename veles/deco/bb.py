@@ -19,6 +19,7 @@ class BasicBlock:
         self.halted = False
         self.start = start
         pos = start
+        self.end = pos
         while True:
             res = isa.parse(data, data_base, base, pos)
             self.insns.append(res)
@@ -27,6 +28,7 @@ class BasicBlock:
                 return
             self.process_insn(res, 'insn_{:x}'.format(pos))
             pos += res.len
+            self.end = pos
             if self.halted:
                 return
             if self.nextpc is not None:
