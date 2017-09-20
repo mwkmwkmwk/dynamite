@@ -15,18 +15,24 @@ class DecoBlock:
         self.valid = False
         self.front = []
         self.name = None
+        self.debug = False
 
     def init_entry(self, tree):
         assert self.tree is None
         self.tree = tree
+        self.debug = self.tree.debug
         self.parent = None
         self.sub_init_entry()
         self.tree.forest.enqueue_block(self)
+        if self.debug:
+            print('init entry {}'.format(self))
 
     def init_input(self, finish):
         assert not self.valid
         self.sub_init_input(finish)
         self.tree.forest.enqueue_block(self)
+        if self.debug:
+            print('init input {} {}'.format(self, self.parent))
 
     def move_under(self, parent):
         if self.parent is parent:
@@ -34,6 +40,9 @@ class DecoBlock:
         if self.parent is not None:
             self.parent.children.remove(self)
         self.tree = parent.tree
+        self.debug = self.tree.debug
+        if self.debug:
+            print('move under {} {} -> {}'.format(self, self.parent, parent))
         self.parent = parent
         self.parent.children.append(self)
 
@@ -47,16 +56,22 @@ class DecoBlock:
     def detach(self):
         if self.tree is None:
             return
+        if self.debug:
+            print('detach {}'.format(self))
         self.invalidate()
         self.tree = None
         self.parent.children.remove(self)
         self.parent = None
-        for finish in self.ins:
+        for finish in self.ins[:]:
             finish.block.invalidate()
 
     def invalidate(self):
         if not self.valid:
             return
+        if self.debug:
+            print('invalidate {}'.format(self))
+        for finish in self.outs():
+            finish.dst.ins.remove(finish)
         self.valid = False
         self.sub_invalidate()
         for child in self.children[:]:
@@ -82,13 +97,21 @@ class DecoBlock:
                     continue
                 new_front.append(block)
         self.front = new_front
+        if self.debug:
+            print('recalc front {}: {}'.format(self, ', '.join(str(x) for x in self.front)))
 
     def process(self):
         self.valid = True
+        self.finish = None
+        if self.debug:
+            print('process {}'.format(self))
         self.sub_process()
         if self.valid:
+            if self.debug:
+                print('process {} done ok'.format(self))
             for finish in self.outs():
                 self.tree.forest.enqueue_edge(self, finish.dst, finish)
+                finish.dst.ins.append(finish)
 
     def sub_init_entry(self):
         raise NotImplementedError
@@ -170,6 +193,9 @@ class DecoBlock:
         for child in self.children:
             child.find_loops(loop)
 
+    def __str__(self):
+        return self.get_name()
+
 
 class DecoTree:
     def __init__(self, forest, root, debug=False):
@@ -226,6 +252,8 @@ class DecoForest:
         while self.edge_queue or self.block_queue:
             if self.edge_queue:
                 src, dst, finish = self.edge_queue.pop()
+                if self.debug:
+                    print('edge {} {} {}'.format(src, dst, finish))
                 if not src.valid:
                     continue
                 if dst.tree is None:
@@ -243,6 +271,12 @@ class DecoForest:
                             self.edge_queue.append((dst, block, None))
                     if finish is not None:
                         dst.add_input(finish)
+                    cur = src
+                    if dst.valid:
+                        while cur != dst.parent:
+                            if dst not in cur.front:
+                                cur.front.append(dst)
+                            cur = cur.parent
                 else:
                     src.invalidate()
             else:
