@@ -134,7 +134,7 @@ class DecoBlock:
         self.expr_cache[full_args] = FOLDING
         res = cls.fold(self, *args)
         if res is None:
-            res = cls(self, 'expr_{:x}_{}'.format(self.pos, self.expr_ctr), *args)
+            res = cls(self, 'expr_{}_{:x}_{}'.format(cls.etype.lower(), self.pos, self.expr_ctr), *args)
             self.expr_ctr += 1
         self.expr_cache[full_args] = res
         return res
