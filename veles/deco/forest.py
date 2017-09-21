@@ -3,7 +3,9 @@
 # Anyway you choose
 # Anyway you're gonna lose
 
-from .finish import FinishGoto, FinishCond
+from .ir import IrVar, IrGoto, IrCond
+
+FOLDING = object()
 
 
 class DecoBlock:
@@ -83,9 +85,9 @@ class DecoBlock:
         assert self.valid
         if self.finish is None:
             return []
-        if isinstance(self.finish, FinishGoto):
+        if isinstance(self.finish, IrGoto):
             return [self.finish]
-        elif isinstance(self.finish, FinishCond):
+        elif isinstance(self.finish, IrCond):
             return [self.finish.finp, self.finish.finn]
         return []
 
@@ -103,6 +105,10 @@ class DecoBlock:
     def process(self):
         self.valid = True
         self.finish = None
+        self.ops = []
+        self.exprs = []
+        self.expr_ctr = 0
+        self.expr_cache = {}
         if self.debug:
             print('process {}'.format(self))
         self.sub_process()
@@ -112,6 +118,26 @@ class DecoBlock:
             for finish in self.outs():
                 self.tree.forest.enqueue_edge(self, finish.dst, finish)
                 finish.dst.ins.append(finish)
+
+    def make_expr(self, cls, *args):
+        if self.parent is not None:
+            for arg in args:
+                if isinstance(arg, IrVar) and arg.block == self:
+                    break
+            else:
+                return self.parent.make_expr(cls, *args)
+        full_args = cls, *args
+        if full_args in self.expr_cache:
+            res = self.expr_cache[full_args]
+            assert res is not FOLDING
+            return res
+        self.expr_cache[full_args] = FOLDING
+        res = cls.fold(self, *args)
+        if res is None:
+            res = cls(self, 'expr_{:x}_{}'.format(self.pos, self.expr_ctr), *args)
+            self.expr_ctr += 1
+        self.expr_cache[full_args] = res
+        return res
 
     def sub_init_entry(self):
         raise NotImplementedError
