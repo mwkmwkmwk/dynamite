@@ -223,6 +223,19 @@ class DecoBlock:
         return self.get_name()
 
 
+class DecoReturn:
+    def __init__(self, tree):
+        self.tree = tree
+
+    def get_name(self):
+        if self.name is not None:
+            return self.name
+        return self.get_default_name()
+
+    def __str__(self):
+        return self.get_name()
+
+
 class DecoTree:
     def __init__(self, forest, root, debug=False):
         self.name = None

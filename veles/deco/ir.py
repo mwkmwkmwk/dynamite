@@ -845,7 +845,7 @@ class IrCall(IrFinish):
 
 
 class IrReturn(IrFinish):
-    def __init__(self, block, ret, extra):
+    def __init__(self, block, path, extra):
         super().__init__(block)
-        self.ret = ret
+        self.path = path
         self.extra = extra

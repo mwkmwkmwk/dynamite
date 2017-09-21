@@ -1,4 +1,4 @@
-from .forest import DecoBlock
+from .forest import DecoBlock, DecoReturn
 from .ir import (
     IrConst,
     IrParam, IrPhi,
@@ -11,7 +11,7 @@ from .ir import (
     IrSlct,
     IrOpRes,
     IrReadReg, IrWriteReg, IrLoad, IrStore, IrSpecial, IrHalt,
-    IrGoto, IrJump, IrCond, IrCall
+    IrGoto, IrJump, IrCond, IrCall, IrReturn,
 )
 
 from .bb import BasicBlock
@@ -297,6 +297,39 @@ class Translator:
             self.xlat_sema_op(op, cond, vstate)
 
 
+class MachineReturn(DecoReturn):
+    def __init__(self, tree, addr, reg_clobber, stack_offset):
+        super().__init__(tree)
+        self.addr = addr
+        self.reg_clobber = reg_clobber
+        self.stack_offset = stack_offset
+        self.name = 'retpath_{}'.format(addr.name)
+
+    def update(reg_clobber, stack_offset):
+        changed = False
+        stack_regs = set(stack_offset) | set(self.stack_offset)
+        for loc in stack_regs:
+            if loc not in self.stack_offset:
+                self.stack_offset[loc] = 0
+                changed = True
+            if loc in stack_offset:
+                new_off = stack_offset[loc]
+            else:
+                new_off = 0
+            if new_off != self.stack_offset[loc] and self.stack_offset[loc] is not None:
+                self.stack_offset[loc] = None
+                changed = True
+        for reg in reg_clobber:
+            if reg not in self.reg_clobber:
+                changed = True
+                self.reg_clobber.add(reg)
+        if changed:
+            self.invalidate()
+
+    def invalidate(self):
+        pass
+
+
 class MachineBaseBlock(DecoBlock):
     def __init__(self, segment):
         super().__init__()
@@ -323,12 +356,14 @@ class MachineBlock(MachineBaseBlock):
         super().__init__(segment)
         self.pos = pos
         self.segment.add_block(self)
-        self.arg_cache = {}
-        self.forbidden_stack_slots = set()
 
     def sub_init_entry(self):
         self.regstate_in = {}
+        self.arg_cache = {}
+        self.forbidden_stack_slots = set()
         self.stack_slots = {}
+        self.ret_paths = []
+        self.ret_path_cache = {}
 
     def sub_process(self):
         xlat = Translator(self)
@@ -375,6 +410,35 @@ class MachineBlock(MachineBaseBlock):
         self.arg_cache[loc] = res
         return res
 
+    def mark_ret_path(self, addr, regstate):
+        clobber = {
+            loc
+            for loc in regstate
+            if isinstance(loc, BaseRegister)
+        }
+        stack_offset = {}
+        for loc, val in regstate.items():
+            if not isinstance(loc, RegisterSP):
+                continue
+            base = val
+            offset = 0
+            if isinstance(base, IrAdd) and isinstance(base.vb, IrConst):
+                offset = base.vb.val
+                base = base.va
+            if not isinstance(base, IrParam) or base.loc != loc:
+                stack_offset[loc] = None
+            else:
+                stack_offset[loc] = offset
+        if addr in self.ret_path_cache:
+            path = self.ret_path_cache[addr]
+            path.update(clobber, stack_offset)
+            return path
+        else:
+            path = MachineReturn(self.tree, addr, clobber, stack_offset)
+            self.ret_path_cache[addr] = path
+            self.ret_paths.append(path)
+            return path
+
 
 class MachineEndBlock(MachineBaseBlock):
     def __init__(self, segment, pos, target):
@@ -396,6 +460,12 @@ class MachineEndBlock(MachineBaseBlock):
             self.finish = IrCond(self, self.target.va,
                 IrGoto(self, tgtp, self.regstate_in),
                 IrGoto(self, tgtn, self.regstate_in),
+            )
+        elif isinstance(self.target, IrParam):
+            self.finish = IrReturn(
+                self,
+                self.tree.root.mark_ret_path(self.target.loc, self.regstate_in),
+                self.regstate_in,
             )
         else:
             def peel_stack_phi(var):

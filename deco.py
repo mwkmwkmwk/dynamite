@@ -25,8 +25,8 @@ args = parser.parse_args()
 from veles.data.bindata import BinData
 from veles.dis.isa.falcon import FalconIsa
 from veles.deco.forest import DecoForest
-from veles.deco.machine import MachineSegment, MachineBlock
-from veles.deco.ir import IrGoto, IrCond, IrJump, IrCall
+from veles.deco.machine import MachineSegment, MachineBlock, MachineReturn
+from veles.deco.ir import IrGoto, IrCond, IrJump, IrCall, IrReturn
 
 forest = DecoForest(debug=args.debug)
 
@@ -96,6 +96,8 @@ def print_finish(indent, finish):
         print('{}goto *{}'.format(ind, finish.addr))
     elif isinstance(finish, IrCall):
         print('{}noreturn {}()'.format(ind, finish.tree.get_name()))
+    elif isinstance(finish, IrReturn):
+        print('{}return {}()'.format(ind, finish.path))
     else:
         print('{}???'.format(ind))
 
@@ -145,4 +147,9 @@ def print_bb(indent, block):
 
 for tree in forest.trees:
     print('Function {}:'.format(tree.get_name()))
+    for path in tree.root.ret_paths:
+        print('    Return path {}'.format(path))
+        if isinstance(path, MachineReturn):
+            print('        Clobber {}'.format(path.reg_clobber))
+            print('        Stack offsets {}'.format(path.stack_offset))
     print_bb(1, tree.root)
