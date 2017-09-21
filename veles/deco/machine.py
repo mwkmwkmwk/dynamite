@@ -305,7 +305,7 @@ class MachineReturn(DecoReturn):
         self.stack_offset = stack_offset
         self.name = 'retpath_{}'.format(addr.name)
 
-    def update(reg_clobber, stack_offset):
+    def update(self, reg_clobber, stack_offset):
         changed = False
         stack_regs = set(stack_offset) | set(self.stack_offset)
         for loc in stack_regs:
@@ -468,7 +468,9 @@ class MachineEndBlock(MachineBaseBlock):
                 self.regstate_in,
             )
         else:
-            def peel_stack_phi(var):
+            def peel_phi(var):
+                if isinstance(var, IrPhi):
+                    return var.block
                 if not isinstance(var, IrOpRes):
                     return
                 if not isinstance(var.op, IrLoad):
@@ -481,7 +483,7 @@ class MachineEndBlock(MachineBaseBlock):
                 if not isinstance(base.loc, RegisterSP):
                     return
                 return base.block
-            new_root = peel_stack_phi(self.target)
+            new_root = peel_phi(self.target)
             if new_root is not None:
                 self.tree.forest.mark_function(new_root)
             self.finish = IrJump(self, self.target, self.regstate_in)
