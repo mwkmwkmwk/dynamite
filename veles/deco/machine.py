@@ -16,7 +16,7 @@ from .ir import (
 from .bb import BasicBlock
 from ..dis.reg import (
     Register, RegisterSP, RegisterPC, RegisterObservable, RegisterSplit, SubRegister,
-    RegisterSpecial,
+    RegisterSpecial, BaseRegister,
 )
 from ..dis.sema import (
     SemaConst, SemaSlct, SemaVar,
@@ -29,6 +29,25 @@ from ..dis.sema import (
     SemaSlct,
     SemaSet, SemaReadReg, SemaWriteReg, SemaLoad, SemaStore, SemaSpecial, SemaSpecialHalt, SemaIfElse,
 )
+from veles.data.repack import Endian
+
+
+class StackSlot:
+    def __init__(self, mem, base, offset, width, endian):
+        self.mem = mem
+        self.base = base
+        self.offset = offset
+        self.width = width
+        self.endian = endian
+
+    def __str__(self):
+        return '{}[{} + {:x}].{}{}'.format(
+            self.mem,
+            self.base,
+            self.offset,
+            'le' if self.endian is Endian.LITTLE else 'be',
+            self.width,
+        )
 
 
 class Translator:
@@ -212,13 +231,24 @@ class Translator:
             if cond is not None:
                 raise NotImplementedError
             addr = self.xlat_sema_expr(op.addr, vstate)
-            vstate[op.val.name] = self.load(op.width, op.mem, op.endian, addr)
+            slot = self.block.tree.root.get_stack_slot(op.mem, addr, op.width, op.endian)
+            if slot is None:
+                vstate[op.val.name] = self.load(op.width, op.mem, op.endian, addr)
+            else:
+                if slot in self.regstate:
+                    vstate[op.val.name] = self.regstate[slot]
+                else:
+                    vstate[op.val.name] = self.block.tree.root.make_arg(slot)
         elif isinstance(op, SemaStore):
             if cond is not None:
                 raise NotImplementedError
             addr = self.xlat_sema_expr(op.addr, vstate)
             val = self.xlat_sema_expr(op.val, vstate)
-            self.store(op.mem, op.endian, addr, val)
+            slot = self.block.tree.root.get_stack_slot(op.mem, addr, val.width, op.endian)
+            if slot is None:
+                self.store(op.mem, op.endian, addr, val)
+            else:
+                self.regstate[slot] = val
         elif isinstance(op, SemaSpecial):
             if cond is not None:
                 raise NotImplementedError
@@ -284,9 +314,11 @@ class MachineBlock(MachineBaseBlock):
         self.pos = pos
         self.segment.add_block(self)
         self.arg_cache = {}
+        self.forbidden_stack_slots = set()
 
     def sub_init_entry(self):
         self.regstate_in = {}
+        self.stack_slots = {}
 
     def sub_process(self):
         xlat = Translator(self)
@@ -307,12 +339,43 @@ class MachineBlock(MachineBaseBlock):
     def get_func_name(self):
         return 'func_{:x}'.format(self.pos)
 
-    def make_arg(self, reg):
+    def get_stack_slot(self, mem, addr, width, endian):
         assert self.parent is None
-        if reg in self.arg_cache:
-            return self.arg_cache[reg]
-        res = IrParam(self, 'arg_{}'.format(reg.name), reg.width, reg)
-        self.arg_cache[reg] = res
+        offset = 0
+        if isinstance(addr, IrAdd) and isinstance(addr.vb, IrConst):
+            offset = addr.vb.val
+            addr = addr.va
+        if not isinstance(addr, IrParam):
+            return
+        if not isinstance(addr.loc, RegisterSP):
+            return
+        args = (mem, addr.loc, offset, width, endian)
+        if args in self.stack_slots:
+            return self.stack_slots[args]
+        if offset in self.forbidden_stack_slots:
+            return
+        res = StackSlot(mem, addr.loc, offset, width, endian)
+        self.stack_slots[args] = res
+        return res
+
+    def make_arg(self, loc):
+        assert self.parent is None
+        if loc in self.arg_cache:
+            return self.arg_cache[loc]
+        if isinstance(loc, StackSlot):
+            name = 'arg_stack_{}_{:x}_{}{}{}'.format(
+                loc.base.name,
+                loc.offset,
+                loc.mem.name,
+                loc.width,
+                'le' if loc.endian is Endian.LITTLE else 'be'
+            )
+        elif isinstance(loc, BaseRegister):
+            name = 'arg_{}'.format(loc.name)
+        else:
+            raise NotImplementedError
+        res = IrParam(self, name, loc.width, loc)
+        self.arg_cache[loc] = res
         return res
 
 
