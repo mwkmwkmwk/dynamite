@@ -623,7 +623,11 @@ class IrExtr(IrExpr):
             a = block.make_expr(IrExtr, va.va, pos, width)
             b = block.make_expr(IrExtr, va.vb, pos, width)
             return block.make_expr(type(va), a, b)
-        if isinstance(va, (IrAdd, IrSub, IrAddX)) and width + pos != va.width:
+        if isinstance(va, IrSlct):
+            b = block.make_expr(IrExtr, va.vb, pos, width)
+            c = block.make_expr(IrExtr, va.vc, pos, width)
+            return block.make_expr(IrSlct, va.va, b, c)
+        if isinstance(va, (IrAdd, IrSub, IrMul, IrAddX)) and width + pos != va.width:
             a = block.make_expr(IrExtr, va.va, 0, pos + width)
             b = block.make_expr(IrExtr, va.vb, 0, pos + width)
             if isinstance(va, IrAddX):
