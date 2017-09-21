@@ -833,11 +833,15 @@ class IrCond(IrFinish):
 
 
 class IrCall(IrFinish):
-    def __init__(self, block, tree, extra):
+    def __init__(self, block, tree, extra, returns):
         super().__init__(block)
         self.tree = tree
         self.extra = extra
-        # XXX returns
+        self.returns = returns
 
 
-# XXX IrReturn
+class IrReturn(IrFinish):
+    def __init__(self, block, ret, extra):
+        super().__init__(block)
+        self.ret = ret
+        self.extra = extra

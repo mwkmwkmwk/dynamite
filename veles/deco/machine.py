@@ -261,8 +261,10 @@ class Translator:
         elif isinstance(op, SemaSpecialHalt):
             if cond is not None:
                 raise NotImplementedError
-            # XXX
-            raise NotImplementedError
+            self.block.finish = IrHalt(self.block, op.special, [
+                self.xlat_sema_expr(val, vstate)
+                for val in op.ins
+            ])
             self.halted = True
         elif isinstance(op, SemaIfElse):
             cur_cond = self.xlat_sema_expr(op.cond, vstate)
@@ -324,9 +326,7 @@ class MachineBlock(MachineBaseBlock):
         xlat = Translator(self)
         xlat.xlat_block()
         self.segment.add_insns(self)
-        if xlat.nextpc is None:
-            self.finish = None
-        else:
+        if xlat.nextpc is not None:
             dst = self.tree.forest.mark_block(MachineEndBlock, self.segment, xlat.end, xlat.nextpc)
             self.finish = IrGoto(self, dst, xlat.regstate)
 
@@ -391,7 +391,8 @@ class MachineEndBlock(MachineBaseBlock):
             if block.tree == self.tree or block.tree is None:
                 self.finish = IrGoto(self, block, self.regstate_in)
             else:
-                self.finish = IrCall(self, block.tree, self.regstate_in)
+                # XXX returns
+                self.finish = IrCall(self, block.tree, self.regstate_in, {})
         elif isinstance(self.target, IrSlct):
             tgtp = self.tree.forest.mark_block(MachineEndBlock, self.segment, self.pos, self.target.vb)
             tgtn = self.tree.forest.mark_block(MachineEndBlock, self.segment, self.pos, self.target.vc)
