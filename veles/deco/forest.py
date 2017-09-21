@@ -259,8 +259,7 @@ class DecoForest:
             self.blocks[full_args] = res
             return res
 
-    def mark_function(self, cls, *args):
-        block = self.mark_block(cls, *args)
+    def mark_function(self, block):
         if block.tree is not None and block.parent is None:
             return block.tree
         block.detach()

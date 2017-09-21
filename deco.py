@@ -71,7 +71,7 @@ with open(args.file) as f:
                     fun_name = p[2]
                 else:
                     fun_name = None
-                fun = forest.mark_function(MachineBlock, segment, fun_start)
+                fun = forest.mark_function(forest.mark_block(MachineBlock, segment, fun_start))
                 fun.set_name(fun_name)
             else:
                 raise ValueError('Unknown command "{}"'.format(cmd))
@@ -123,8 +123,8 @@ def print_bb(indent, block):
                 for insn in block.raw_insns:
                     print('{}{:08x} {:18} {}'.format(ind, insn.start, ' '.join(format(x, '02x') for x in data[insn.start:insn.end]), (' '*28 + '\n').join(str(x) for x in insn.insns)))
                 print()
-        for reg in block.phis:
-            print('{}phi_{:x}_{} = ${}'.format(ind, block.pos, reg, reg))
+        for loc, phi in block.phis.items():
+            print('{}{} = {}'.format(ind, phi, loc))
         for op in block.ops:
             print('{}{}'.format(ind, op))
         for expr in block.exprs:

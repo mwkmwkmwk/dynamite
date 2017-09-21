@@ -9,6 +9,7 @@ from .ir import (
     IrEq,
     IrConcat, IrExtr, IrSext,
     IrSlct,
+    IrOpRes,
     IrReadReg, IrWriteReg, IrLoad, IrStore, IrSpecial, IrHalt,
     IrGoto, IrJump, IrCond, IrCall
 )
@@ -39,10 +40,17 @@ class StackSlot:
         self.offset = offset
         self.width = width
         self.endian = endian
+        self.name = 'stack_{}_{:x}_{}{}{}'.format(
+            self.base.name,
+            self.offset,
+            self.mem.name,
+            self.width,
+            'le' if self.endian is Endian.LITTLE else 'be'
+        )
 
     def __str__(self):
         return '{}[{} + {:x}].{}{}'.format(
-            self.mem,
+            self.mem.name,
             self.base,
             self.offset,
             'le' if self.endian is Endian.LITTLE else 'be',
@@ -362,18 +370,7 @@ class MachineBlock(MachineBaseBlock):
         assert self.parent is None
         if loc in self.arg_cache:
             return self.arg_cache[loc]
-        if isinstance(loc, StackSlot):
-            name = 'arg_stack_{}_{:x}_{}{}{}'.format(
-                loc.base.name,
-                loc.offset,
-                loc.mem.name,
-                loc.width,
-                'le' if loc.endian is Endian.LITTLE else 'be'
-            )
-        elif isinstance(loc, BaseRegister):
-            name = 'arg_{}'.format(loc.name)
-        else:
-            raise NotImplementedError
+        name = 'arg_{}'.format(loc.name)
         res = IrParam(self, name, loc.width, loc)
         self.arg_cache[loc] = res
         return res
@@ -401,6 +398,22 @@ class MachineEndBlock(MachineBaseBlock):
                 IrGoto(self, tgtn, self.regstate_in),
             )
         else:
+            def peel_stack_phi(var):
+                if not isinstance(var, IrOpRes):
+                    return
+                if not isinstance(var.op, IrLoad):
+                    return
+                base = var.op.ins[0]
+                if isinstance(base, IrAdd) and isinstance(base.vb, IrConst):
+                    base = base.va
+                if not isinstance(base, IrPhi):
+                    return
+                if not isinstance(base.loc, RegisterSP):
+                    return
+                return base.block
+            new_root = peel_stack_phi(self.target)
+            if new_root is not None:
+                self.tree.forest.mark_function(new_root)
             self.finish = IrJump(self, self.target, self.regstate_in)
 
 
