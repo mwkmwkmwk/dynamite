@@ -3,6 +3,8 @@
 # Anyway you choose
 # Anyway you're gonna lose
 
+from collections import Counter
+
 from .ir import (
     const_cuts,
     cut_ranges,
@@ -275,6 +277,55 @@ class DecoBlock:
         for child in self.children:
             child.compute_clean_phis()
 
+    def compute_counts(self):
+        def bump_count(val):
+            if isinstance(val, IrExpr):
+                val.block.expr_counts[val] += 1
+
+        weight = 1
+        self.expr_counts = Counter()
+        for child in self.children:
+            child.compute_counts()
+            weight += child.weight
+        for op in self.ops:
+            for val in op.ins:
+                bump_count(val)
+                weight += 1
+            weight += 1
+        for fin in self.outs():
+            for val in fin.phi_vals.values():
+                bump_count(val)
+                weight += 1
+            weight += 1
+        if isinstance(self.finish, IrCond):
+            bump_count(self.finish.cond)
+            weight += 1
+        if isinstance(self.finish, IrJump):
+            bump_count(self.finish.addr)
+            weight += 1
+        if isinstance(self.finish, IrHalt):
+            for val in self.finish.ins:
+                bump_count(val)
+                weight += 1
+            weight += 1
+        if isinstance(self.finish, IrCall):
+            for val in self.finish.arg_vals.values():
+                bump_count(val)
+                weight += 1
+            weight += 1
+        if isinstance(self.finish, IrReturn):
+            for val in self.finish.res_vals.values():
+                bump_count(val)
+                weight += 1
+            weight += 1
+        for expr in reversed(self.exprs):
+            if self.expr_counts[expr]:
+                for val, mask in expr.live_ins(-1):
+                    bump_count(val)
+                    weight += 1
+                weight += 1
+        self.weight = weight
+
     def __str__(self):
         return self.get_name()
 
@@ -478,6 +529,7 @@ class DecoForest:
         self.compute_live_masks()
         for tree in self.trees:
             tree.root.compute_clean_phis()
+            tree.root.compute_counts()
 
 
 class DecoTreeScc:

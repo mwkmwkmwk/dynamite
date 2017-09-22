@@ -149,9 +149,9 @@ def print_bb(indent, block):
         else:
             print('{}[in loop_{:x}]'.format(ind[4:], block.loop.root.pos))
     if block.front:
-        print('{}{} [FRONT {}]:'.format(ind[4:], block.get_name(), ', '.join(x.get_name() for x in block.front)))
+        print('{}{} [{}] [FRONT {}]:'.format(ind[4:], block.get_name(), block.weight, ', '.join(x.get_name() for x in block.front)))
     else:
-        print('{}{}:'.format(ind[4:], block.get_name()))
+        print('{}{} [{}]:'.format(ind[4:], block.get_name(), block.weight))
     if not block.valid:
         print('{}INVALID'.format(ind))
         print()
@@ -168,7 +168,8 @@ def print_bb(indent, block):
             print('{}{}'.format(ind, op))
         for expr in block.exprs:
             mask = forest.live_masks.get(expr, 0)
-            print('{}[{:x}] {}'.format(ind, mask, expr.display()))
+            count = expr.block.expr_counts[expr]
+            print('{}[{}] [{:x}] {}'.format(ind, count, mask, expr.display()))
         print_finish(indent, block.finish)
         print()
         for scc in block.child_sccs:
