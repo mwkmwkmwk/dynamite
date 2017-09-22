@@ -14,7 +14,6 @@ from .ir import (
     IrGoto, IrJump, IrCond, IrCall, IrCallReturn, IrReturn,
 )
 
-from .bb import BasicBlock
 from ..dis.reg import (
     Register, RegisterSP, RegisterPC, RegisterObservable, RegisterSplit, SubRegister,
     RegisterSpecial, BaseRegister,

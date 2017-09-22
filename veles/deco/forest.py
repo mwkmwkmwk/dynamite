@@ -9,7 +9,7 @@ from .ir import (
     const_cuts,
     cut_ranges,
     IrVar, IrConst,
-    IrParam, IrPhi, IrCallRes,
+    IrParam, IrPhi, IrCallRes, IrCallReturn,
     IrExpr,
     IrAdd, IrSub, IrMul,
     IrAnd, IrOr, IrXor,
@@ -264,6 +264,78 @@ class DecoBlock:
                     if fin.dst not in cur_loop.front:
                         cur_loop.front.append(fin.dst)
                     cur_loop = cur_loop.parent
+
+    def simplify_finish(self):
+        for child in self.children:
+            child.simplify_finish()
+        self.simple_finish = self.finish
+        self.simple_sccs = self.child_sccs
+        substs = {}
+        def xlat_goto(goto):
+            if goto.dst in self.children and isinstance(goto.dst.finish, IrGoto) and not goto.dst.ops and not goto.phi_vals:
+                substs[goto.dst] = goto.dst.simple_sccs
+                return goto.dst.finish
+            return goto
+        def same_goto(fa, fb):
+            return fa.dst == fb.dst and fa.phi_vals == fb.phi_vals
+        if isinstance(self.finish, IrGoto):
+            dst = self.finish.dst
+            if self.children == [dst] and not dst.ops and not self.finish.phi_vals and len(dst.ins) == 1:
+                self.simple_finish = dst.simple_finish
+                substs[dst] = dst.simple_sccs
+        if isinstance(self.finish, IrCond):
+            cond = self.finish.cond
+            finp = xlat_goto(self.finish.finp)
+            finn = xlat_goto(self.finish.finn)
+            while True:
+                if finp.dst in self.children and not finp.dst.ops and not finp.phi_vals and len(finp.dst.ins) == 1 and isinstance(finp.dst.finish, IrCond):
+                    if same_goto(finn, finp.dst.finish.finn):
+                        new_cond = self.make_expr(IrAnd, cond, finp.dst.finish.cond)
+                        finp = finp.dst.finish.finp
+                    elif same_goto(finn, finp.dst.finish.finp):
+                        new_cond = self.make_expr(IrAnd, cond,
+                            self.make_expr(IrXor, finp.dst.finish.cond, IrConst(1, 1)),
+                        )
+                        finp = finp.dst.finish.finn
+                    else:
+                        break
+                    substs[finp.dst] = finp.dst.simple_sccs
+                elif finn.dst in self.children and not finn.dst.ops and not finn.phi_vals and len(finn.dst.ins) == 1 and isinstance(finn.dst.finish, IrCond):
+                    if same_goto(finp, finn.dst.finish.finp):
+                        new_cond = self.make_expr(IrOr, cond, finn.dst.finish.cond)
+                        finn = finn.dst.finish.finn
+                    elif same_goto(finp, finn.dst.finish.finn):
+                        new_cond = self.make_expr(IrOr, cond,
+                            self.make_expr(IrXor, finn.dst.finish.cond, IrConst(1, 1)),
+                        )
+                        finn = finp.dst.finish.finp
+                    else:
+                        break
+                    substs[finn.dst] = finn.dst.simple_sccs
+                else:
+                    break
+            self.simple_finish = IrCond(self, cond, finp, finn)
+        if isinstance(self.finish, IrCall):
+            self.simple_finish = IrCall(
+                self,
+                self.finish.tree,
+                self.finish.extra,
+                {
+                    path: IrCallReturn(xlat_goto(ret.finish), ret.results)
+                    for path, ret in self.finish.returns.items()
+                }
+            )
+            self.simple_finish.arg_vals = self.finish.arg_vals
+        self.simple_sccs = []
+        def emit_scc(scc):
+            if len(scc.nodes) == 1 and scc.nodes[0] in substs:
+                for sub_scc in substs[scc.nodes[0]]:
+                    emit_scc(sub_scc)
+            else:
+                self.simple_sccs.append(scc)
+        for scc in self.child_sccs:
+            emit_scc(scc)
+
 
     def compute_clean_phis(self):
         if isinstance(self.finish, IrCall):
@@ -540,14 +612,14 @@ class DecoForest:
                     raise NotImplementedError
 
     def post_process(self):
-        for tree in self.trees:
-            tree.root.post_process_sort()
-            tree.root.loop = None
-            tree.root.find_loops()
         self.compute_live_masks()
         for tree in self.trees:
             tree.root.compute_clean_phis()
             tree.root.compute_counts()
+            tree.root.post_process_sort()
+            tree.root.loop = None
+            tree.root.find_loops()
+            tree.root.simplify_finish()
 
 
 class DecoTreeScc:
