@@ -4,6 +4,8 @@
 # Anyway you're gonna lose
 
 from .ir import (
+    const_cuts,
+    cut_ranges,
     IrVar, IrConst,
     IrParam, IrPhi, IrCallRes,
     IrExpr,
@@ -27,22 +29,24 @@ class DecoBlock:
         self.valid = False
         self.front = []
         self.name = None
+        self.phis = {}
         self.debug = False
 
     def init_entry(self, tree):
         assert self.tree is None
         self.tree = tree
+        self.forest = tree.forest
         self.debug = self.tree.debug
         self.parent = None
         self.sub_init_entry()
-        self.tree.forest.enqueue_block(self)
+        self.forest.enqueue_block(self)
         if self.debug:
             print('init entry {}'.format(self))
 
     def init_input(self, finish):
         assert not self.valid
         self.sub_init_input(finish)
-        self.tree.forest.enqueue_block(self)
+        self.forest.enqueue_block(self)
         if self.debug:
             print('init input {} {}'.format(self, self.parent))
 
@@ -52,6 +56,7 @@ class DecoBlock:
         if self.parent is not None:
             self.parent.children.remove(self)
         self.tree = parent.tree
+        self.forest = self.tree.forest
         self.debug = self.tree.debug
         if self.debug:
             print('move under {} {} -> {}'.format(self, self.parent, parent))
@@ -96,7 +101,7 @@ class DecoBlock:
         for child in self.children[:]:
             child.detach()
         if self.tree is not None:
-            self.tree.forest.enqueue_block(self)
+            self.forest.enqueue_block(self)
 
     def outs(self):
         assert self.valid
@@ -138,7 +143,7 @@ class DecoBlock:
             if self.debug:
                 print('process {} done ok'.format(self))
             for finish in self.outs():
-                self.tree.forest.enqueue_edge(self, finish.dst, finish)
+                self.forest.enqueue_edge(self, finish.dst, finish)
                 finish.dst.ins.append(finish)
 
     def make_expr(self, cls, *args):
@@ -240,6 +245,35 @@ class DecoBlock:
             loop.nodes.append(self)
         for child in self.children:
             child.find_loops(loop)
+
+    def compute_clean_phis(self):
+        if isinstance(self.finish, IrCall):
+            self.finish.arg_vals = {}
+            for arg in self.finish.tree.root.args:
+                mask = self.forest.live_masks.get(arg, 0)
+                if mask == 0:
+                    continue
+                val = self.get_passed_arg(arg)
+                if val is not None:
+                    self.finish.arg_vals[arg] = self.make_expr(IrAnd, val, IrConst(val.width, mask))
+        elif isinstance(self.finish, IrReturn):
+            self.finish.res_vals = {}
+            for loc in self.finish.path.res_locs():
+                mask = self.forest.live_rets.get((self.finish.path, loc), 0)
+                if mask == 0:
+                    continue
+                val = self.get_passed_res(loc)
+                self.finish.res_vals[loc] = self.make_expr(IrAnd, val, IrConst(val.width, mask))
+        for fin in self.outs():
+            fin.phi_vals = {}
+            for phi in fin.dst.phis.values():
+                mask = self.forest.live_masks.get(phi, 0)
+                if mask == 0:
+                    continue
+                val = self.get_passed_phi(fin, phi.loc)
+                fin.phi_vals[phi] = self.make_expr(IrAnd, val, IrConst(val.width, mask))
+        for child in self.children:
+            child.compute_clean_phis()
 
     def __str__(self):
         return self.get_name()
@@ -380,10 +414,7 @@ class DecoForest:
                     continue
                 block.process()
 
-    def post_process(self):
-        for tree in self.trees:
-            tree.root.post_process_sort()
-            tree.root.find_loops(None)
+    def compute_live_masks(self):
         self.live_masks = {}
         self.live_rets = {}
         live_queue = []
@@ -420,7 +451,7 @@ class DecoForest:
                             live_queue.append((cval, mask))
                 elif isinstance(val, IrPhi):
                     for fin in val.block.ins:
-                        cval = fin.block.get_passed_phi(fin, val)
+                        cval = fin.block.get_passed_phi(fin, val.loc)
                         live_queue.append((cval, mask))
                 elif isinstance(val, IrCallRes):
                     key = val.ret_path, val.loc
@@ -429,7 +460,7 @@ class DecoForest:
                     if cur_mask != new_mask:
                         self.live_rets[key] = new_mask
                         for block in val.ret_path.blocks:
-                            cval = block.get_passed_res(val)
+                            cval = block.get_passed_res(val.loc)
                             live_queue.append((cval, mask))
                 elif isinstance(val, IrExpr):
                     for cval, cmask in val.live_ins(mask):
@@ -439,6 +470,14 @@ class DecoForest:
                 else:
                     print(type(val))
                     raise NotImplementedError
+
+    def post_process(self):
+        for tree in self.trees:
+            tree.root.post_process_sort()
+            tree.root.find_loops(None)
+        self.compute_live_masks()
+        for tree in self.trees:
+            tree.root.compute_clean_phis()
 
 
 class DecoTreeScc:

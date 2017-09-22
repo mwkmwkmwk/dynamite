@@ -337,12 +337,14 @@ class MachineReturn(DecoReturn):
     def invalidate(self):
         self.tree.invalidate_callers()
 
+    def res_locs(self):
+        return self.reg_clobber
+
 
 class MachineBaseBlock(DecoBlock):
     def __init__(self, segment):
         super().__init__()
         self.segment = segment
-        self.phis = {}
 
     def sub_init_input(self, finish):
         self.regstate_in = dict(finish.extra)
@@ -360,8 +362,7 @@ class MachineBaseBlock(DecoBlock):
                     self.regstate_in[reg] = phi
                     self.invalidate()
 
-    def get_passed_phi(self, finish, val):
-        loc = val.loc
+    def get_passed_phi(self, finish, loc):
         if loc in finish.extra:
             return finish.extra[loc]
         else:
@@ -390,7 +391,7 @@ class MachineBlock(MachineBaseBlock):
         if self.valid:
             self.segment.add_insns(self)
         if xlat.nextpc is not None:
-            dst = self.tree.forest.mark_block(MachineEndBlock, self.segment, xlat.end, xlat.nextpc)
+            dst = self.forest.mark_block(MachineEndBlock, self.segment, xlat.end, xlat.nextpc)
             self.finish = IrGoto(self, dst, xlat.regstate)
 
     def sub_invalidate(self):
@@ -488,7 +489,7 @@ class MachineEndBlock(MachineBaseBlock):
 
     def sub_process(self):
         if isinstance(self.target, IrConst):
-            block = self.tree.forest.mark_block(MachineBlock, self.segment, self.target.val)
+            block = self.forest.mark_block(MachineBlock, self.segment, self.target.val)
             if not self.valid:
                 return
             if self.debug:
@@ -538,14 +539,14 @@ class MachineEndBlock(MachineBaseBlock):
                             ret_addr = self.regstate_in[slot]
                         else:
                             ret_addr = self.tree.root.make_arg(slot)
-                    tgt = self.tree.forest.mark_block(MachineEndBlock, self.segment, self.pos, ret_addr)
+                    tgt = self.forest.mark_block(MachineEndBlock, self.segment, self.pos, ret_addr)
                     returns[path] = IrCallReturn(IrGoto(self, tgt, regstate), results)
                 self.finish = IrCall(self, block.tree, self.regstate_in, returns)
                 if self.valid:
                     block.tree.add_caller(self)
         elif isinstance(self.target, IrSlct):
-            tgtp = self.tree.forest.mark_block(MachineEndBlock, self.segment, self.pos, self.target.vb)
-            tgtn = self.tree.forest.mark_block(MachineEndBlock, self.segment, self.pos, self.target.vc)
+            tgtp = self.forest.mark_block(MachineEndBlock, self.segment, self.pos, self.target.vb)
+            tgtn = self.forest.mark_block(MachineEndBlock, self.segment, self.pos, self.target.vc)
             self.finish = IrCond(self, self.target.va,
                 IrGoto(self, tgtp, self.regstate_in),
                 IrGoto(self, tgtn, self.regstate_in),
@@ -576,11 +577,11 @@ class MachineEndBlock(MachineBaseBlock):
                 return base.block
             new_root = peel_phi(self.target)
             if new_root is not None:
-                self.tree.forest.mark_function(new_root)
+                self.forest.mark_function(new_root)
             self.finish = IrJump(self, self.target, self.regstate_in)
 
-    def get_passed_res(self, res):
-        return self.get_passed_phi(self.finish, res)
+    def get_passed_res(self, loc):
+        return self.get_passed_phi(self.finish, loc)
 
     def get_passed_arg(self, arg):
         loc = arg.loc

@@ -91,6 +91,8 @@ def print_finish(indent, finish):
                 print('{}    [{} = {}]'.format(ind, loc, val))
     elif isinstance(finish, IrGoto):
         print('{}goto {}'.format(ind, finish.dst.get_name()))
+        for phi, val in finish.phi_vals.items():
+            print('{}    {} = {}'.format(ind, phi, val))
         if isinstance(finish.extra, dict):
             for loc, val in finish.extra.items():
                 print('{}    [{} = {}]'.format(ind, loc, val))
@@ -106,6 +108,8 @@ def print_finish(indent, finish):
             for loc, val in finish.extra.items():
                 print('{}    [{} = {}]'.format(ind, loc, val))
     elif isinstance(finish, IrCall):
+        for arg, val in finish.arg_vals.items():
+            print('{}    {} = {}'.format(ind, arg, val))
         if len(finish.returns) == 0:
             print('{}noreturn {}()'.format(ind, finish.tree.get_name()))
         elif len(finish.returns) == 1:
@@ -124,6 +128,8 @@ def print_finish(indent, finish):
                     print('{}    [{:x}] {} = {}'.format(ind, mask, res, res.loc))
                 print_finish(indent + 1, ret.finish)
     elif isinstance(finish, IrReturn):
+        for loc, val in finish.res_vals.items():
+            print('{}    {} = {}'.format(ind, loc, val))
         print('{}return {}()'.format(ind, finish.path))
         if isinstance(finish.extra, dict):
             for loc, val in finish.extra.items():
