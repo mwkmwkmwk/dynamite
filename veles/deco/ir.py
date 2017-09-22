@@ -38,6 +38,12 @@ class IrParam(IrVar):
         self.loc = loc
 
 
+class IrCallRes(IrVar):
+    def __init__(self, block, name, width, loc):
+        super().__init__(block, name, width)
+        self.loc = loc
+
+
 class IrPhi(IrVar):
     def __init__(self, block, name, width, loc):
         super().__init__(block, name, width)

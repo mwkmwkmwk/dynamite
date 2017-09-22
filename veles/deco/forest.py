@@ -3,7 +3,7 @@
 # Anyway you choose
 # Anyway you're gonna lose
 
-from .ir import IrVar, IrGoto, IrCond
+from .ir import IrVar, IrGoto, IrCond, IrCall
 
 FOLDING = object()
 
@@ -70,12 +70,17 @@ class DecoBlock:
     def invalidate(self):
         if not self.valid:
             return
+        self.front = []
+        if self.parent is not None:
+            self.parent.recalc_front()
         if self.debug:
             print('invalidate {}'.format(self))
         for finish in self.outs():
             finish.dst.ins.remove(finish)
         self.valid = False
         self.sub_invalidate()
+        if isinstance(self.finish, IrCall):
+            self.finish.tree.del_caller(self)
         for child in self.children[:]:
             child.detach()
         if self.tree is not None:
@@ -89,9 +94,13 @@ class DecoBlock:
             return [self.finish]
         elif isinstance(self.finish, IrCond):
             return [self.finish.finp, self.finish.finn]
+        elif isinstance(self.finish, IrCall):
+            return self.finish.returns.values()
         return []
 
     def recalc_front(self):
+        if not self.valid:
+            return
         new_front = [x.dst for x in self.outs() if x.dst not in self.children]
         for child in self.children:
             for block in child.front:
@@ -111,6 +120,7 @@ class DecoBlock:
         self.expr_cache = {}
         if self.debug:
             print('process {}'.format(self))
+        assert self.tree is not None
         self.sub_process()
         if self.valid:
             if self.debug:
@@ -242,6 +252,7 @@ class DecoTree:
         self.forest = forest
         self.root = root
         self.debug = debug
+        self.callers = []
         self.root.init_entry(self)
         for finish in root.ins[:]:
             finish.block.invalidate()
@@ -253,6 +264,29 @@ class DecoTree:
         if self.name is not None:
             return self.name
         return self.root.get_func_name()
+
+    def add_caller(self, caller):
+        if self.debug:
+            print('new caller {} -> {}'.format(caller, self))
+        assert caller not in self.callers
+        self.callers.append(caller)
+
+    def del_caller(self, caller):
+        if self.debug:
+            print('gone caller {} -> {}'.format(caller, self))
+        assert caller in self.callers
+        self.callers.remove(caller)
+
+    def invalidate_callers(self):
+        if self.debug:
+            print('invalidate callers {}'.format(self))
+        for caller in self.callers[:]:
+            if self.debug:
+                print('invalidate caller {} -> {}'.format(caller, self))
+            caller.invalidate()
+
+    def __str__(self):
+        return self.get_name()
 
 
 class DecoForest:
@@ -295,9 +329,9 @@ class DecoForest:
                 if not src.valid:
                     continue
                 if dst.tree is None:
-                    assert finish is not None
-                    dst.move_under(src)
-                    dst.init_input(finish)
+                    if finish is not None:
+                        dst.move_under(src)
+                        dst.init_input(finish)
                 elif src.tree == dst.tree and dst != src.tree.root:
                     src_path = set(src.root_path())
                     if dst.parent not in src_path:

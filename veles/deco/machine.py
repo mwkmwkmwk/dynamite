@@ -1,7 +1,7 @@
 from .forest import DecoBlock, DecoReturn
 from .ir import (
     IrConst,
-    IrParam, IrPhi,
+    IrParam, IrPhi, IrCallRes,
     IrAdd, IrSub, IrMul, IrUDiv, IrUMod,
     IrAnd, IrOr, IrXor,
     IrAddX, IrCF, IrOF,
@@ -127,7 +127,11 @@ class Translator:
             ov = self.read_reg(reg)
             if cond is not None:
                 val = self.block.make_expr(IrSlct, cond, val, ov)
-            self.regstate[reg] = val
+            if isinstance(val, IrParam) and val.loc == reg:
+                if reg in self.regstate:
+                    del self.regstate[reg]
+            else:
+                self.regstate[reg] = val
             if isinstance(reg, RegisterObservable) and ov != val:
                 IrWriteReg(self.block, reg, val)
         elif isinstance(reg, RegisterPC):
@@ -256,7 +260,11 @@ class Translator:
             if slot is None:
                 self.store(op.mem, op.endian, addr, val)
             else:
-                self.regstate[slot] = val
+                if isinstance(val, IrParam) and val.loc == slot:
+                    if slot in self.regstate:
+                        del self.regstate[slot]
+                else:
+                    self.regstate[slot] = val
         elif isinstance(op, SemaSpecial):
             if cond is not None:
                 raise NotImplementedError
@@ -327,7 +335,7 @@ class MachineReturn(DecoReturn):
             self.invalidate()
 
     def invalidate(self):
-        pass
+        self.tree.invalidate_callers()
 
 
 class MachineBaseBlock(DecoBlock):
@@ -346,6 +354,8 @@ class MachineBaseBlock(DecoBlock):
             if reg not in finish.extra or reg not in self.regstate_in or finish.extra[reg] != self.regstate_in[reg]:
                 if reg not in self.phis:
                     phi = IrPhi(self, 'phi_{:x}_{}'.format(self.pos, reg.name), reg.width, reg)
+                    if self.debug:
+                        print('new phi {} {} {}'.format(phi, self.regstate_in.get(reg), finish.extra.get(reg)))
                     self.phis[reg] = phi
                     self.regstate_in[reg] = phi
                     self.invalidate()
@@ -368,7 +378,8 @@ class MachineBlock(MachineBaseBlock):
     def sub_process(self):
         xlat = Translator(self)
         xlat.xlat_block()
-        self.segment.add_insns(self)
+        if self.valid:
+            self.segment.add_insns(self)
         if xlat.nextpc is not None:
             dst = self.tree.forest.mark_block(MachineEndBlock, self.segment, xlat.end, xlat.nextpc)
             self.finish = IrGoto(self, dst, xlat.regstate)
@@ -413,8 +424,10 @@ class MachineBlock(MachineBaseBlock):
     def mark_ret_path(self, addr, regstate):
         clobber = {
             loc
-            for loc in regstate
-            if isinstance(loc, BaseRegister)
+            for loc, val in regstate.items()
+            if isinstance(loc, BaseRegister) and (
+                not isinstance(val, IrParam) or val.loc != loc
+            )
         }
         stack_offset = {}
         for loc, val in regstate.items():
@@ -429,14 +442,22 @@ class MachineBlock(MachineBaseBlock):
                 stack_offset[loc] = None
             else:
                 stack_offset[loc] = offset
+        if self.debug:
+            print('found return {} -> {}'.format(self, addr))
+            for loc, val in regstate.items():
+                print('{} = {}'.format(loc, val))
+            print('clobber {}'.format(', '.join(str(x) for x in clobber)))
         if addr in self.ret_path_cache:
             path = self.ret_path_cache[addr]
             path.update(clobber, stack_offset)
             return path
         else:
+            if self.debug:
+                print('new one!')
             path = MachineReturn(self.tree, addr, clobber, stack_offset)
             self.ret_path_cache[addr] = path
             self.ret_paths.append(path)
+            self.tree.invalidate_callers()
             return path
 
 
@@ -446,14 +467,66 @@ class MachineEndBlock(MachineBaseBlock):
         self.pos = pos
         self.target = target
 
+    def get_default_name(self):
+        if isinstance(self.target, IrConst):
+            return 'end_{:x}_{:x}'.format(self.pos, self.target.val)
+        else:
+            return 'end_{:x}_{}'.format(self.pos, self.target)
+
     def sub_process(self):
         if isinstance(self.target, IrConst):
             block = self.tree.forest.mark_block(MachineBlock, self.segment, self.target.val)
-            if block.tree == self.tree or block.tree is None:
+            if not self.valid:
+                return
+            if self.debug:
+                print('goto {} [tree {}] {} [tree {}]'.format(self, self.tree, block, block.tree))
+            if (block.tree == self.tree and block != self.tree.root) or block.tree is None:
                 self.finish = IrGoto(self, block, self.regstate_in)
             else:
-                # XXX returns
-                self.finish = IrCall(self, block.tree, self.regstate_in, {})
+                returns = {}
+                for path in block.tree.root.ret_paths:
+                    regstate = dict(self.regstate_in)
+                    for loc in path.reg_clobber:
+                        regstate[loc] = IrCallRes(self, 'res_{:x}_{}_{}'.format(self.pos, block.tree.get_name(), loc), loc.width, loc)
+                    for loc, off in path.stack_offset.items():
+                        if loc in self.regstate_in:
+                            val = self.regstate_in[loc]
+                        else:
+                            val = self.tree.root.make_arg(loc)
+                        regstate[loc] = self.make_expr(IrAdd, val, IrConst(loc.width, off))
+                        if isinstance(regstate[loc], IrParam) and regstate[loc].loc == loc:
+                            del regstate[loc]
+                    if isinstance(path.addr, BaseRegister):
+                        slot = path.addr
+                    elif isinstance(path.addr, StackSlot):
+                        if path.addr.base in self.regstate_in:
+                            base = self.regstate_in[path.addr.base]
+                        else:
+                            base = self.tree.root.make_arg(path.addr.base)
+                        ret_addr_addr = self.make_expr(IrAdd, base, IrConst(base.width, path.addr.offset))
+                        slot = self.tree.root.get_stack_slot(path.addr.mem, ret_addr_addr, path.addr.width, path.addr.endian)
+                        if slot is None:
+                            op = IrLoad(
+                                self,
+                                'ret_load_{}_{}'.format(self, path),
+                                path.addr.width,
+                                path.addr.mem,
+                                path.addr.endian,
+                                ret_addr_addr,
+                            )
+                            ret_addr = op.outs[0]
+                    else:
+                        raise NotImplementedError
+                    if slot is not None:
+                        if slot in self.regstate_in:
+                            ret_addr = self.regstate_in[slot]
+                        else:
+                            ret_addr = self.tree.root.make_arg(slot)
+                    tgt = self.tree.forest.mark_block(MachineEndBlock, self.segment, self.pos, ret_addr)
+                    returns[path] = IrGoto(self, tgt, regstate)
+                self.finish = IrCall(self, block.tree, self.regstate_in, returns)
+                if self.valid:
+                    block.tree.add_caller(self)
         elif isinstance(self.target, IrSlct):
             tgtp = self.tree.forest.mark_block(MachineEndBlock, self.segment, self.pos, self.target.vb)
             tgtn = self.tree.forest.mark_block(MachineEndBlock, self.segment, self.pos, self.target.vc)
@@ -497,6 +570,7 @@ class MachineSegment:
         self.base = base
         self.blocks = {}
         self.insns = {}
+        self.parse_cache = {}
 
     def add_block(self, block):
         self.blocks[block.pos] = block
@@ -518,4 +592,8 @@ class MachineSegment:
                     del self.insns[pos]
 
     def parse_insn(self, pos):
-        return self.isa.parse(self.data, self.data_base, self.base, pos)
+        if pos in self.parse_cache:
+            return self.parse_cache[pos]
+        res = self.isa.parse(self.data, self.data_base, self.base, pos)
+        self.parse_cache[pos] = res
+        return res

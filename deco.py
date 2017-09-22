@@ -86,6 +86,9 @@ def print_finish(indent, finish):
         print('{}Halt'.format(ind))
     elif isinstance(finish, IrGoto):
         print('{}goto {}'.format(ind, finish.dst.get_name()))
+        if isinstance(finish.extra, dict):
+            for loc, val in finish.extra.items():
+                print('{}    [{} = {}]'.format(ind, loc, val))
     elif isinstance(finish, IrCond):
         print('{}if ({}) {{'.format(ind, finish.cond))
         print_finish(indent + 1, finish.finp)
@@ -94,10 +97,26 @@ def print_finish(indent, finish):
         print('{}}}'.format(ind))
     elif isinstance(finish, IrJump):
         print('{}goto *{}'.format(ind, finish.addr))
+        if isinstance(finish.extra, dict):
+            for loc, val in finish.extra.items():
+                print('{}    [{} = {}]'.format(ind, loc, val))
     elif isinstance(finish, IrCall):
-        print('{}noreturn {}()'.format(ind, finish.tree.get_name()))
+        if len(finish.returns) == 0:
+            print('{}noreturn {}()'.format(ind, finish.tree.get_name()))
+        elif len(finish.returns) == 1:
+            print('{}{}()'.format(ind, finish.tree.get_name()))
+            fin, = finish.returns.values()
+            print_finish(indent, fin)
+        else:
+            print('{}{}() ->'.format(ind, finish.tree.get_name()))
+            for path, fin in finish.returns.items():
+                print('{}{}:'.format(ind, path))
+                print_finish(indent + 1, fin)
     elif isinstance(finish, IrReturn):
         print('{}return {}()'.format(ind, finish.path))
+        if isinstance(finish.extra, dict):
+            for loc, val in finish.extra.items():
+                print('{}    [{} = {}]'.format(ind, loc, val))
     else:
         print('{}???'.format(ind))
 
