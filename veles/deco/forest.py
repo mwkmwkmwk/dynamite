@@ -553,7 +553,7 @@ class DecoForest:
                     if finish is not None:
                         dst.add_input(finish)
                     cur = src
-                    if dst.valid:
+                    if src.valid:
                         while cur != dst.parent:
                             if dst not in cur.front:
                                 cur.front.append(dst)
