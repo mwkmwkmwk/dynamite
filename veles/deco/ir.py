@@ -814,10 +814,11 @@ class IrFinish:
 
 
 class IrHalt(IrFinish):
-    def __init__(self, block, special, ins):
+    def __init__(self, block, special, ins, extra):
         super().__init__(block)
         self.special = special
         self.ins = list(ins)
+        self.extra = extra
 
 
 class IrGoto(IrFinish):

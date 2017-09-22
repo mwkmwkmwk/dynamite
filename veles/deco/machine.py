@@ -280,7 +280,7 @@ class Translator:
             self.block.finish = IrHalt(self.block, op.special, [
                 self.xlat_sema_expr(val, vstate)
                 for val in op.ins
-            ])
+            ], dict(self.regstate))
             self.halted = True
         elif isinstance(op, SemaIfElse):
             cur_cond = self.xlat_sema_expr(op.cond, vstate)
@@ -368,6 +368,7 @@ class MachineBlock(MachineBaseBlock):
         self.segment.add_block(self)
 
     def sub_init_entry(self):
+        self.phis = {}
         self.regstate_in = {}
         self.arg_cache = {}
         self.forbidden_stack_slots = set()

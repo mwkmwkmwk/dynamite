@@ -26,7 +26,7 @@ from veles.data.bindata import BinData
 from veles.dis.isa.falcon import FalconIsa
 from veles.deco.forest import DecoForest
 from veles.deco.machine import MachineSegment, MachineBlock, MachineReturn
-from veles.deco.ir import IrGoto, IrCond, IrJump, IrCall, IrReturn
+from veles.deco.ir import IrGoto, IrCond, IrJump, IrCall, IrReturn, IrHalt
 
 forest = DecoForest(debug=args.debug)
 
@@ -84,6 +84,11 @@ def print_finish(indent, finish):
     ind = '    ' * indent
     if finish is None:
         print('{}Halt'.format(ind))
+    elif isinstance(finish, IrHalt):
+        print('{}{}({})'.format(ind, finish.special.name, ', '.join(str(x) for x in finish.ins)))
+        if isinstance(finish.extra, dict):
+            for loc, val in finish.extra.items():
+                print('{}    [{} = {}]'.format(ind, loc, val))
     elif isinstance(finish, IrGoto):
         print('{}goto {}'.format(ind, finish.dst.get_name()))
         if isinstance(finish.extra, dict):
