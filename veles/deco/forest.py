@@ -236,17 +236,34 @@ class DecoBlock:
                 make_scc(child)
         self.child_sccs.reverse()
 
-    def find_loops(self, loop):
-        while loop is not None and loop.root not in self.front:
-            loop.front.append(self)
-            loop = loop.parent
-        if self in self.front:
-            loop = DecoLoop(self, loop)
-        self.loop = loop
-        if loop is not None:
-            loop.nodes.append(self)
-        for child in self.children:
-            child.find_loops(loop)
+    def find_loops(self):
+        for scc in reversed(self.child_sccs):
+            scc_loop = self.loop
+            front = set(scc.front)
+            while scc_loop is not None and not (front & set(scc_loop.nodes)):
+                scc_loop.inner_front += scc.nodes
+                for node in scc.nodes:
+                    if node not in scc_loop.front:
+                        scc_loop.front.append(node)
+                scc_loop = scc_loop.parent
+            if scc_loop is not None:
+                scc_loop.nodes += scc.nodes
+            if len(scc.nodes) > 1:
+                scc_loop = DecoLoop(scc.nodes, scc_loop)
+            for node in scc.nodes:
+                cur_loop = scc_loop
+                if node in node.front:
+                    cur_loop = DecoLoop([node], scc_loop)
+                node.loop = cur_loop
+            for node in scc.nodes:
+                node.find_loops()
+        for fin in self.outs():
+            if fin.dst not in self.children:
+                cur_loop = self.loop
+                while cur_loop is not None and fin.dst not in cur_loop.nodes:
+                    if fin.dst not in cur_loop.front:
+                        cur_loop.front.append(fin.dst)
+                    cur_loop = cur_loop.parent
 
     def compute_clean_phis(self):
         if isinstance(self.finish, IrCall):
@@ -525,7 +542,8 @@ class DecoForest:
     def post_process(self):
         for tree in self.trees:
             tree.root.post_process_sort()
-            tree.root.find_loops(None)
+            tree.root.loop = None
+            tree.root.find_loops()
         self.compute_live_masks()
         for tree in self.trees:
             tree.root.compute_clean_phis()
@@ -539,16 +557,21 @@ class DecoTreeScc:
         self.front = []
         for node in nodes:
             for dst in node.front:
-                if dst not in self.front:
+                if dst not in self.front and dst not in self.nodes:
                     self.front.append(dst)
 
 
 class DecoLoop:
-    def __init__(self, root, parent):
-        self.root = root
+    def __init__(self, roots, parent):
+        self.tree = roots[0].tree
+        self.roots = roots
         self.parent = parent
-        self.nodes = []
+        self.nodes = roots[:]
         self.subloops = []
         self.front = []
+        self.inner_front = []
         if parent is not None:
             parent.subloops.append(self)
+
+    def __str__(self):
+        return 'loop_{}'.format(', '.join(str(x) for x in self.roots))

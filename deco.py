@@ -141,13 +141,13 @@ def print_finish(indent, finish):
 def print_bb(indent, block):
     ind = '    ' * indent
     if block.loop:
-        if block.loop.root is block:
-            print('{}loop_{:x}:'.format(ind[4:], block.pos))
+        if block.loop.roots == [block]:
+            print('{}{}:'.format(ind[4:], block.loop))
             print('{}nodes: {}'.format(ind, ', '.join(x.get_name() for x in block.loop.nodes)))
-            print('{}subloops: {}'.format(ind, ', '.join('loop_{:x}'.format(x.root.pos) for x in block.loop.subloops)))
+            print('{}subloops: {}'.format(ind, ', '.join(str(x) for x in block.loop.subloops)))
             print('{}front: {}'.format(ind, ', '.join(x.get_name() for x in block.loop.front)))
         else:
-            print('{}[in loop_{:x}]'.format(ind[4:], block.loop.root.pos))
+            print('{}[in {}]'.format(ind[4:], block.loop))
     if block.front:
         print('{}{} [{}] [FRONT {}]:'.format(ind[4:], block.get_name(), block.weight, ', '.join(x.get_name() for x in block.front)))
     else:
