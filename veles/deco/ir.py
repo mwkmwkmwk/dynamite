@@ -1,8 +1,35 @@
 from veles.data.repack import Endian
 
 
+def const_cuts(width, val):
+    res = set()
+    pos = 0
+    pv = val & 1
+    while pos < width:
+        cv = val >> pos & 1
+        if cv != pv:
+            res.add(pos)
+        pos += 1
+        pv = cv
+    return res
+
+
+def cut_ranges(width, *args):
+    cuts = set()
+    for arg in args:
+        cuts |= arg
+    scuts = sorted(cuts)
+    return zip([0] + scuts, scuts + [width])
+
+
+def lo_mask(mask):
+    return (1 << mask.bit_length()) - 1
+
+
 class IrVal:
-    pass
+    def cuts(self):
+        return set()
+
 
 class IrConst(IrVal):
     def __init__(self, width, val):
@@ -19,6 +46,9 @@ class IrConst(IrVal):
 
     def __str__(self):
         return 'uint{}_t(0x{:x})'.format(self.width, self.val)
+
+    def cuts(self):
+        return const_cuts(self.width, self.val)
 
 
 class IrVar(IrVal):
@@ -67,8 +97,11 @@ class IrBin(IrExpr):
         self.va = va
         self.vb = vb
 
-    def ins(self):
-        return [self.va, self.vb]
+    def live_ins(self, mask):
+        return [
+            (self.va, -1),
+            (self.vb, -1),
+        ]
 
     def display(self):
         return '{} = {}({}, {})'.format(self.name, self.etype, self.va, self.vb)
@@ -130,6 +163,13 @@ class IrAdd(IrBinUni):
     commutative = True
     associative = True
 
+    def live_ins(self, mask):
+        in_mask = lo_mask(mask)
+        return [
+            (self.va, in_mask),
+            (self.vb, in_mask),
+        ]
+
     @classmethod
     def fold_const(cls, block, width, a, b):
         return IrConst(width, a + b)
@@ -146,6 +186,13 @@ class IrAdd(IrBinUni):
 
 class IrSub(IrBinUni):
     etype = 'SUB'
+
+    def live_ins(self, mask):
+        in_mask = lo_mask(mask)
+        return [
+            (self.va, in_mask),
+            (self.vb, in_mask),
+        ]
 
     @classmethod
     def fold_const_right(cls, block, va, b):
@@ -169,6 +216,13 @@ class IrMul(IrBinUni):
 
     commutative = True
     associative = True
+
+    def live_ins(self, mask):
+        in_mask = lo_mask(mask)
+        return [
+            (self.va, in_mask),
+            (self.vb, in_mask),
+        ]
 
     @classmethod
     def fold_const(cls, block, width, a, b):
@@ -214,17 +268,17 @@ class IrBitwise(IrBinUni):
     commutative = True
     associative = True
 
+    def live_ins(self, mask):
+        return [
+            (self.va, mask),
+            (self.vb, mask),
+        ]
+
     @classmethod
     def fold_other(cls, block, va, vb):
         if isinstance(va, IrConcat) or isinstance(vb, IrConcat):
-            cuts = {0, va.width}
-            if isinstance(va, IrConcat):
-                cuts |= set(va.cuts())
-            if isinstance(vb, IrConcat):
-                cuts |= set(vb.cuts())
-            cuts = sorted(cuts)
             parts = []
-            for lo, hi in zip(cuts, cuts[1:]):
+            for lo, hi in cut_ranges(va.width, va.cuts(), vb.cuts()):
                 sa = block.make_expr(IrExtr, va, lo, hi - lo)
                 sb = block.make_expr(IrExtr, vb, lo, hi - lo)
                 parts.append(block.make_expr(cls, sa, sb))
@@ -245,23 +299,9 @@ class IrAnd(IrBitwise):
         elif b == IrConst(va.width, -1).val:
             return va
         parts = []
-        start = 0
-        pos = 0
-        val = b & 1
-        while pos < va.width:
-            cv = b >> pos & 1
-            if cv != val:
-                if val:
-                    parts.append(block.make_expr(IrExtr, va, start, pos - start))
-                else:
-                    parts.append(IrConst(pos - start, 0))
-                start = pos
-            pos += 1
-            val = cv
-        if val:
-            parts.append(block.make_expr(IrExtr, va, start, pos - start))
-        else:
-            parts.append(IrConst(pos - start, 0))
+        for lo, hi in cut_ranges(va.width, va.cuts(), const_cuts(va.width, b)):
+            sa = block.make_expr(IrExtr, va, lo, hi - lo)
+            parts.append(block.make_expr(cls, sa, IrConst(hi - lo, b >> lo)))
         return block.make_expr(IrConcat, *parts)
 
     @classmethod
@@ -283,23 +323,9 @@ class IrOr(IrBitwise):
         elif b == IrConst(va.width, -1).val:
             return IrConst(va.width, -1)
         parts = []
-        start = 0
-        pos = 0
-        val = b & 1
-        while pos < va.width:
-            cv = b >> pos & 1
-            if cv != val:
-                if val:
-                    parts.append(IrConst(pos - start, -1))
-                else:
-                    parts.append(block.make_expr(IrExtr, va, start, pos - start))
-                start = pos
-            pos += 1
-            val = cv
-        if val:
-            parts.append(block.make_expr(IrExtr, va, start, pos - start))
-        else:
-            parts.append(IrConst(pos - start, 0))
+        for lo, hi in cut_ranges(va.width, va.cuts(), const_cuts(va.width, b)):
+            sa = block.make_expr(IrExtr, va, lo, hi - lo)
+            parts.append(block.make_expr(cls, sa, IrConst(hi - lo, b >> lo)))
         return block.make_expr(IrConcat, *parts)
 
     @classmethod
@@ -406,14 +432,8 @@ class IrEq(IrBinPred):
     @classmethod
     def fold_other(cls, block, va, vb):
         if isinstance(va, IrConcat) or isinstance(vb, IrConcat):
-            cuts = {0, va.width}
-            if isinstance(va, IrConcat):
-                cuts |= set(va.cuts())
-            if isinstance(vb, IrConcat):
-                cuts |= set(vb.cuts())
-            cuts = sorted(cuts)
             res = IrConst(1, 1)
-            for lo, hi in zip(cuts, cuts[1:]):
+            for lo, hi in cut_ranges(va.width, va.cuts(), vb.cuts()):
                 sa = block.make_expr(IrExtr, va, lo, hi - lo)
                 sb = block.make_expr(IrExtr, vb, lo, hi - lo)
                 eq = block.make_expr(IrEq, sa, sb)
@@ -460,8 +480,13 @@ class IrAddX(IrExpr):
         self.vb = vb
         self.vc = vc
 
-    def ins(self):
-        return [self.va, self.vb, self.vc]
+    def live_ins(self, mask):
+        in_mask = lo_mask(mask)
+        return [
+            (self.va, in_mask),
+            (self.vb, in_mask),
+            (self.vc, 1)
+        ]
 
     def display(self):
         return '{} = ADDX({}, {}, {})'.format(self.name, self.va, self.vb, self.vc)
@@ -486,8 +511,12 @@ class IrCF(IrExpr):
         self.vb = vb
         self.vc = vc
 
-    def ins(self):
-        return [self.va, self.vb, self.vc]
+    def live_ins(self, mask):
+        return [
+            (self.va, 1),
+            (self.vb, 1),
+            (self.vc, 1),
+        ]
 
     def display(self):
         return '{} = CF({}, {}, {})'.format(self.name, self.va, self.vb, self.vc)
@@ -514,8 +543,12 @@ class IrOF(IrExpr):
         self.vb = vb
         self.vc = vc
 
-    def ins(self):
-        return [self.va, self.vb, self.vc]
+    def live_ins(self, mask):
+        return [
+            (self.va, 1),
+            (self.vb, 1),
+            (self.vc, 1),
+        ]
 
     def display(self):
         return '{} = OF({}, {}, {})'.format(self.name, self.va, self.vb, self.vc)
@@ -533,18 +566,23 @@ class IrConcat(IrExpr):
         super().__init__(block, name, sum(part.width for part in parts))
         self.parts = parts
 
-    def ins(self):
-        return self.parts
+    def live_ins(self, mask):
+        pos = 0
+        res = []
+        for part in self.parts:
+            res.append((part, mask >> pos))
+            pos += part.width
+        return res
 
     def display(self):
         return '{} = CONCAT({})'.format(self.name, ', '.join(str(x) for x in self.parts))
 
     def cuts(self):
         pos = 0
-        res = []
+        res = set()
         for part in self.parts:
             if pos != 0:
-                res.append(pos)
+                res.add(pos)
             pos += part.width
         return res
 
@@ -576,8 +614,10 @@ class IrExtr(IrExpr):
         self.va = va
         self.pos = pos
 
-    def ins(self):
-        return [self.va]
+    def live_ins(self, mask):
+        return [
+            (self.va, mask << self.pos),
+        ]
 
     def display(self):
         return '{} = EXTR({}, {}, {})'.format(self.name, self.va, self.pos, self.width)
@@ -651,8 +691,10 @@ class IrSext(IrExpr):
         super().__init__(block, name, width)
         self.va = va
 
-    def ins(self):
-        return [self.va]
+    def live_ins(self, mask):
+        return [
+            (self.va, mask),
+        ]
 
     def display(self):
         return '{} = SEXT({}, {})'.format(self.name, self.va, self.width)
@@ -686,8 +728,12 @@ class IrSlct(IrExpr):
         self.vb = vb
         self.vc = vc
 
-    def ins(self):
-        return [self.va, self.vb, self.vc]
+    def live_ins(self, mask):
+        return [
+            (self.va, 1),
+            (self.vb, mask),
+            (self.vc, mask),
+        ]
 
     def display(self):
         return '{} = SLCT({}, {}, {})'.format(self.name, self.va, self.vb, self.vc)

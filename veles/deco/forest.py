@@ -7,7 +7,7 @@ from .ir import (
     IrVar, IrConst,
     IrParam, IrPhi, IrCallRes,
     IrExpr,
-    IrAdd, IrSub, IrMul, IrAddX,
+    IrAdd, IrSub, IrMul,
     IrAnd, IrOr, IrXor,
     IrExtr, IrSext, IrConcat,
     IrSlct,
@@ -431,31 +431,9 @@ class DecoForest:
                         for block in val.ret_path.blocks:
                             cval = block.get_passed_res(val)
                             live_queue.append((cval, mask))
-                elif isinstance(val, IrExtr):
-                    live_queue.append((val.va, mask << val.pos))
-                elif isinstance(val, IrConcat):
-                    pos = 0
-                    for part in val.parts:
-                        live_queue.append((part, mask >> pos))
-                        pos += part.width
-                elif isinstance(val, IrSext):
-                    live_queue.append((val.va, mask))
-                elif isinstance(val, IrSlct):
-                    live_queue.append((val.va, 1))
-                    live_queue.append((val.vb, mask))
-                    live_queue.append((val.vc, mask))
-                elif isinstance(val, (IrAnd, IrOr, IrXor)):
-                    live_queue.append((val.va, mask))
-                    live_queue.append((val.vb, mask))
-                elif isinstance(val, (IrAdd, IrSub, IrMul, IrAddX)):
-                    in_mask = (1 << mask.bit_length()) - 1
-                    live_queue.append((val.va, in_mask))
-                    live_queue.append((val.vb, in_mask))
-                    if isinstance(val, IrAddX):
-                        live_queue.append((val.vc, 1))
                 elif isinstance(val, IrExpr):
-                    for cval in val.ins():
-                        live_queue.append((cval, -1))
+                    for cval, cmask in val.live_ins(mask):
+                        live_queue.append((cval, cmask))
                 elif isinstance(val, IrOpRes):
                     pass
                 else:
