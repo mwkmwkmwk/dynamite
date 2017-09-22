@@ -11,7 +11,7 @@ from .ir import (
     IrSlct,
     IrOpRes,
     IrReadReg, IrWriteReg, IrLoad, IrStore, IrSpecial, IrHalt,
-    IrGoto, IrJump, IrCond, IrCall, IrReturn,
+    IrGoto, IrJump, IrCond, IrCall, IrCallReturn, IrReturn,
 )
 
 from .bb import BasicBlock
@@ -360,6 +360,13 @@ class MachineBaseBlock(DecoBlock):
                     self.regstate_in[reg] = phi
                     self.invalidate()
 
+    def get_passed_phi(self, finish, val):
+        loc = val.loc
+        if loc in finish.extra:
+            return finish.extra[loc]
+        else:
+            return self.tree.root.make_arg(loc)
+
 
 class MachineBlock(MachineBaseBlock):
     def __init__(self, segment, pos):
@@ -370,6 +377,7 @@ class MachineBlock(MachineBaseBlock):
     def sub_init_entry(self):
         self.phis = {}
         self.regstate_in = {}
+        self.args = []
         self.arg_cache = {}
         self.forbidden_stack_slots = set()
         self.stack_slots = {}
@@ -394,7 +402,7 @@ class MachineBlock(MachineBaseBlock):
     def get_func_name(self):
         return 'func_{:x}'.format(self.pos)
 
-    def get_stack_slot(self, mem, addr, width, endian):
+    def get_stack_slot(self, mem, addr, width, endian, try_harder=True):
         assert self.parent is None
         offset = 0
         if isinstance(addr, IrAdd) and isinstance(addr.vb, IrConst):
@@ -407,6 +415,8 @@ class MachineBlock(MachineBaseBlock):
         args = (mem, addr.loc, offset, width, endian)
         if args in self.stack_slots:
             return self.stack_slots[args]
+        if not try_harder:
+            return
         if offset in self.forbidden_stack_slots:
             return
         res = StackSlot(mem, addr.loc, offset, width, endian)
@@ -415,11 +425,13 @@ class MachineBlock(MachineBaseBlock):
 
     def make_arg(self, loc):
         assert self.parent is None
+        assert isinstance(loc, (BaseRegister, StackSlot))
         if loc in self.arg_cache:
             return self.arg_cache[loc]
         name = 'arg_{}'.format(loc.name)
         res = IrParam(self, name, loc.width, loc)
         self.arg_cache[loc] = res
+        self.args.append(res)
         return res
 
     def mark_ret_path(self, addr, regstate):
@@ -487,8 +499,11 @@ class MachineEndBlock(MachineBaseBlock):
                 returns = {}
                 for path in block.tree.root.ret_paths:
                     regstate = dict(self.regstate_in)
+                    results = []
                     for loc in path.reg_clobber:
-                        regstate[loc] = IrCallRes(self, 'res_{:x}_{}_{}'.format(self.pos, block.tree.get_name(), loc), loc.width, loc)
+                        res = IrCallRes(self, 'res_{:x}_{}_{}'.format(self.pos, block.tree.get_name(), loc), loc.width, path, loc)
+                        results.append(res)
+                        regstate[loc] = res
                     for loc, off in path.stack_offset.items():
                         if loc in self.regstate_in:
                             val = self.regstate_in[loc]
@@ -524,7 +539,7 @@ class MachineEndBlock(MachineBaseBlock):
                         else:
                             ret_addr = self.tree.root.make_arg(slot)
                     tgt = self.tree.forest.mark_block(MachineEndBlock, self.segment, self.pos, ret_addr)
-                    returns[path] = IrGoto(self, tgt, regstate)
+                    returns[path] = IrCallReturn(IrGoto(self, tgt, regstate), results)
                 self.finish = IrCall(self, block.tree, self.regstate_in, returns)
                 if self.valid:
                     block.tree.add_caller(self)
@@ -541,6 +556,8 @@ class MachineEndBlock(MachineBaseBlock):
                 self.tree.root.mark_ret_path(self.target.loc, self.regstate_in),
                 self.regstate_in,
             )
+            if self.valid:
+                self.finish.path.add_block(self)
         else:
             def peel_phi(var):
                 if isinstance(var, IrPhi):
@@ -561,6 +578,36 @@ class MachineEndBlock(MachineBaseBlock):
             if new_root is not None:
                 self.tree.forest.mark_function(new_root)
             self.finish = IrJump(self, self.target, self.regstate_in)
+
+    def get_passed_res(self, res):
+        return self.get_passed_phi(self.finish, res)
+
+    def get_passed_arg(self, arg):
+        loc = arg.loc
+        assert isinstance(self.finish, IrCall)
+        if isinstance(loc, BaseRegister):
+            if loc in self.regstate_in:
+                return self.regstate_in[loc]
+            return self.tree.root.make_arg(loc)
+        elif isinstance(loc, StackSlot):
+            if loc.base in self.regstate_in:
+                base = self.regstate_in[loc.base]
+                try_harder = False
+            else:
+                base = self.tree.root.make_arg(loc.base)
+                try_harder = True
+            loc_addr = self.make_expr(IrAdd, base, IrConst(base.width, loc.offset))
+            slot = self.tree.root.get_stack_slot(loc.mem, loc_addr, loc.width, loc.endian, try_harder)
+            if slot is None:
+                # :(
+                return None
+            if slot in self.regstate_in:
+                return self.regstate_in[slot]
+            return self.tree.root.make_arg(slot)
+        else:
+            print(arg)
+            print(loc)
+            raise NotImplementedError
 
 
 class MachineSegment:

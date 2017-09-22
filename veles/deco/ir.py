@@ -39,8 +39,9 @@ class IrParam(IrVar):
 
 
 class IrCallRes(IrVar):
-    def __init__(self, block, name, width, loc):
+    def __init__(self, block, name, width, ret_path, loc):
         super().__init__(block, name, width)
+        self.ret_path = ret_path
         self.loc = loc
 
 
@@ -841,6 +842,12 @@ class IrCond(IrFinish):
         self.cond = cond
         self.finp = finp
         self.finn = finn
+
+
+class IrCallReturn:
+    def __init__(self, finish, results):
+        self.finish = finish
+        self.results = results
 
 
 class IrCall(IrFinish):

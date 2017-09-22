@@ -3,7 +3,17 @@
 # Anyway you choose
 # Anyway you're gonna lose
 
-from .ir import IrVar, IrGoto, IrCond, IrCall
+from .ir import (
+    IrVar, IrConst,
+    IrParam, IrPhi, IrCallRes,
+    IrExpr,
+    IrAdd, IrSub, IrMul, IrAddX,
+    IrAnd, IrOr, IrXor,
+    IrExtr, IrSext, IrConcat,
+    IrSlct,
+    IrOpRes,
+    IrGoto, IrCond, IrCall, IrJump, IrHalt, IrReturn
+)
 
 FOLDING = object()
 
@@ -81,6 +91,8 @@ class DecoBlock:
         self.sub_invalidate()
         if isinstance(self.finish, IrCall):
             self.finish.tree.del_caller(self)
+        if isinstance(self.finish, IrReturn):
+            self.finish.path.del_block(self)
         for child in self.children[:]:
             child.detach()
         if self.tree is not None:
@@ -95,7 +107,7 @@ class DecoBlock:
         elif isinstance(self.finish, IrCond):
             return [self.finish.finp, self.finish.finn]
         elif isinstance(self.finish, IrCall):
-            return self.finish.returns.values()
+            return [ret.finish for ret in self.finish.returns.values()]
         return []
 
     def recalc_front(self):
@@ -236,6 +248,7 @@ class DecoBlock:
 class DecoReturn:
     def __init__(self, tree):
         self.tree = tree
+        self.blocks = []
 
     def get_name(self):
         if self.name is not None:
@@ -244,6 +257,14 @@ class DecoReturn:
 
     def __str__(self):
         return self.get_name()
+
+    def add_block(self, block):
+        assert block not in self.blocks
+        self.blocks.append(block)
+
+    def del_block(self, block):
+        assert block in self.blocks
+        self.blocks.remove(block)
 
 
 class DecoTree:
@@ -363,6 +384,83 @@ class DecoForest:
         for tree in self.trees:
             tree.root.post_process_sort()
             tree.root.find_loops(None)
+        self.live_masks = {}
+        self.live_rets = {}
+        live_queue = []
+        def mark_roots(block):
+            if isinstance(block.finish, IrJump):
+                live_queue.append((block.finish.addr, -1))
+            if isinstance(block.finish, IrCond):
+                live_queue.append((block.finish.cond, -1))
+            if isinstance(block.finish, IrHalt):
+                for val in block.finish.ins:
+                    live_queue.append((val, -1))
+            for op in block.ops:
+                for val in op.ins:
+                    live_queue.append((val, -1))
+            for child in block.children:
+                mark_roots(child)
+        for tree in self.trees:
+            mark_roots(tree.root)
+        while live_queue:
+            val, mask = live_queue.pop()
+            if isinstance(val, IrConst):
+                continue
+            mask &= (1 << val.width) - 1
+            if mask == 0:
+                continue
+            cur_mask = self.live_masks.get(val, 0)
+            mask |= cur_mask
+            if mask != cur_mask:
+                self.live_masks[val] = mask
+                if isinstance(val, IrParam):
+                    for caller in val.block.tree.callers:
+                        cval = caller.get_passed_arg(val)
+                        if cval is not None:
+                            live_queue.append((cval, mask))
+                elif isinstance(val, IrPhi):
+                    for fin in val.block.ins:
+                        cval = fin.block.get_passed_phi(fin, val)
+                        live_queue.append((cval, mask))
+                elif isinstance(val, IrCallRes):
+                    key = val.ret_path, val.loc
+                    cur_mask = self.live_rets.get(key, 0)
+                    new_mask = cur_mask | mask
+                    if cur_mask != new_mask:
+                        self.live_rets[key] = new_mask
+                        for block in val.ret_path.blocks:
+                            cval = block.get_passed_res(val)
+                            live_queue.append((cval, mask))
+                elif isinstance(val, IrExtr):
+                    live_queue.append((val.va, mask << val.pos))
+                elif isinstance(val, IrConcat):
+                    pos = 0
+                    for part in val.parts:
+                        live_queue.append((part, mask >> pos))
+                        pos += part.width
+                elif isinstance(val, IrSext):
+                    live_queue.append((val.va, mask))
+                elif isinstance(val, IrSlct):
+                    live_queue.append((val.va, 1))
+                    live_queue.append((val.vb, mask))
+                    live_queue.append((val.vc, mask))
+                elif isinstance(val, (IrAnd, IrOr, IrXor)):
+                    live_queue.append((val.va, mask))
+                    live_queue.append((val.vb, mask))
+                elif isinstance(val, (IrAdd, IrSub, IrMul, IrAddX)):
+                    in_mask = (1 << mask.bit_length()) - 1
+                    live_queue.append((val.va, in_mask))
+                    live_queue.append((val.vb, in_mask))
+                    if isinstance(val, IrAddX):
+                        live_queue.append((val.vc, 1))
+                elif isinstance(val, IrExpr):
+                    for cval in val.ins():
+                        live_queue.append((cval, -1))
+                elif isinstance(val, IrOpRes):
+                    pass
+                else:
+                    print(type(val))
+                    raise NotImplementedError
 
 
 class DecoTreeScc:

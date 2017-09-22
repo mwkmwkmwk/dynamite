@@ -110,13 +110,19 @@ def print_finish(indent, finish):
             print('{}noreturn {}()'.format(ind, finish.tree.get_name()))
         elif len(finish.returns) == 1:
             print('{}{}()'.format(ind, finish.tree.get_name()))
-            fin, = finish.returns.values()
-            print_finish(indent, fin)
+            ret, = finish.returns.values()
+            for res in ret.results:
+                mask = forest.live_masks.get(res, 0)
+                print('{}[{:x}] {} = {}'.format(ind, mask, res, res.loc))
+            print_finish(indent, ret.finish)
         else:
             print('{}{}() ->'.format(ind, finish.tree.get_name()))
-            for path, fin in finish.returns.items():
+            for path, ret in finish.returns.items():
                 print('{}{}:'.format(ind, path))
-                print_finish(indent + 1, fin)
+                for res in ret.results:
+                    mask = forest.live_masks.get(res, 0)
+                    print('{}    [{:x}] {} = {}'.format(ind, mask, res, res.loc))
+                print_finish(indent + 1, ret.finish)
     elif isinstance(finish, IrReturn):
         print('{}return {}()'.format(ind, finish.path))
         if isinstance(finish.extra, dict):
@@ -150,11 +156,13 @@ def print_bb(indent, block):
                     print('{}{:08x} {:18} {}'.format(ind, insn.start, ' '.join(format(x, '02x') for x in data[insn.start:insn.end]), (' '*28 + '\n').join(str(x) for x in insn.insns)))
                 print()
         for loc, phi in block.phis.items():
-            print('{}{} = {}'.format(ind, phi, loc))
+            mask = forest.live_masks.get(phi, 0)
+            print('{}[{:x}] {} = {}'.format(ind, mask, phi, loc))
         for op in block.ops:
             print('{}{}'.format(ind, op))
         for expr in block.exprs:
-            print('{}{}'.format(ind, expr.display()))
+            mask = forest.live_masks.get(expr, 0)
+            print('{}[{:x}] {}'.format(ind, mask, expr.display()))
         print_finish(indent, block.finish)
         print()
         for scc in block.child_sccs:
@@ -176,4 +184,7 @@ for tree in forest.trees:
         if isinstance(path, MachineReturn):
             print('        Clobber {}'.format(path.reg_clobber))
             print('        Stack offsets {}'.format(path.stack_offset))
+    for arg in tree.root.args:
+        mask = forest.live_masks.get(arg, 0)
+        print('    [{:x}] {} = {}'.format(mask, arg, arg.loc))
     print_bb(1, tree.root)
