@@ -171,7 +171,7 @@ def print_bb(indent, block):
             count = expr.block.expr_counts[expr]
             print('{}[{}] [{:x}] {}'.format(ind, count, mask, expr.display()))
         print_finish(indent, block.finish)
-        print('{}simple:'.format(ind))
+        print('{}simple [SCCS: {}]:'.format(ind, block.simple_sccs))
         print_finish(indent, block.simple_finish)
         print()
         for scc in block.child_sccs:

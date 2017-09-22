@@ -268,13 +268,17 @@ class DecoBlock:
     def simplify_finish(self):
         for child in self.children:
             child.simplify_finish()
+        if self.debug:
+            print('SIMPLIFY {}'.format(self))
         self.simple_finish = self.finish
-        self.simple_sccs = self.child_sccs
-        substs = {}
+        substs = set()
+        all_sccs = set(self.child_sccs)
         def xlat_goto(goto):
-            if goto.dst in self.children and isinstance(goto.dst.finish, IrGoto) and not goto.dst.ops and not goto.phi_vals:
-                substs[goto.dst] = goto.dst.simple_sccs
-                return goto.dst.finish
+            nonlocal all_sccs
+            if goto.dst in self.children and isinstance(goto.dst.simple_finish, IrGoto) and not goto.dst.ops and not goto.phi_vals:
+                substs.add(goto.dst.scc)
+                all_sccs |= set(goto.dst.simple_sccs)
+                return goto.dst.simple_finish
             return goto
         def same_goto(fa, fb):
             return fa.dst == fb.dst and fa.phi_vals == fb.phi_vals
@@ -282,36 +286,43 @@ class DecoBlock:
             dst = self.finish.dst
             if self.children == [dst] and not dst.ops and not self.finish.phi_vals and len(dst.ins) == 1:
                 self.simple_finish = dst.simple_finish
-                substs[dst] = dst.simple_sccs
+                all_sccs |= set(dst.simple_sccs)
+                substs.add(dst.scc)
         if isinstance(self.finish, IrCond):
             cond = self.finish.cond
             finp = xlat_goto(self.finish.finp)
             finn = xlat_goto(self.finish.finn)
             while True:
-                if finp.dst in self.children and not finp.dst.ops and not finp.phi_vals and len(finp.dst.ins) == 1 and isinstance(finp.dst.finish, IrCond):
-                    if same_goto(finn, finp.dst.finish.finn):
-                        new_cond = self.make_expr(IrAnd, cond, finp.dst.finish.cond)
-                        finp = finp.dst.finish.finp
-                    elif same_goto(finn, finp.dst.finish.finp):
-                        new_cond = self.make_expr(IrAnd, cond,
-                            self.make_expr(IrXor, finp.dst.finish.cond, IrConst(1, 1)),
+                if finp.dst.scc in all_sccs and not finp.dst.ops and not finp.phi_vals and len(finp.dst.ins) == 1 and isinstance(finp.dst.simple_finish, IrCond):
+                    if same_goto(finn, finp.dst.simple_finish.finn):
+                        cond = self.make_expr(IrAnd, cond, finp.dst.simple_finish.cond)
+                        all_sccs |= set(finp.dst.simple_sccs)
+                        substs.add(finp.dst.scc)
+                        finp = finp.dst.simple_finish.finp
+                    elif same_goto(finn, finp.dst.simple_finish.finp):
+                        cond = self.make_expr(IrAnd, cond,
+                            self.make_expr(IrXor, finp.dst.simple_finish.cond, IrConst(1, 1)),
                         )
-                        finp = finp.dst.finish.finn
+                        all_sccs |= set(finp.dst.simple_sccs)
+                        substs.add(finp.dst.scc)
+                        finp = finp.dst.simple_finish.finn
                     else:
                         break
-                    substs[finp.dst] = finp.dst.simple_sccs
-                elif finn.dst in self.children and not finn.dst.ops and not finn.phi_vals and len(finn.dst.ins) == 1 and isinstance(finn.dst.finish, IrCond):
-                    if same_goto(finp, finn.dst.finish.finp):
-                        new_cond = self.make_expr(IrOr, cond, finn.dst.finish.cond)
-                        finn = finn.dst.finish.finn
-                    elif same_goto(finp, finn.dst.finish.finn):
-                        new_cond = self.make_expr(IrOr, cond,
-                            self.make_expr(IrXor, finn.dst.finish.cond, IrConst(1, 1)),
+                elif finn.dst.scc in all_sccs and not finn.dst.ops and not finn.phi_vals and len(finn.dst.ins) == 1 and isinstance(finn.dst.simple_finish, IrCond):
+                    if same_goto(finp, finn.dst.simple_finish.finp):
+                        cond = self.make_expr(IrOr, cond, finn.dst.simple_finish.cond)
+                        all_sccs |= set(finn.dst.simple_sccs)
+                        substs.add(finn.dst.scc)
+                        finn = finn.dst.simple_finish.finn
+                    elif same_goto(finp, finn.dst.simple_finish.finn):
+                        cond = self.make_expr(IrOr, cond,
+                            self.make_expr(IrXor, finn.dst.simple_finish.cond, IrConst(1, 1)),
                         )
-                        finn = finp.dst.finish.finp
+                        all_sccs |= set(finn.dst.simple_sccs)
+                        substs.add(finn.dst.scc)
+                        finn = finp.dst.simple_finish.finp
                     else:
                         break
-                    substs[finn.dst] = finn.dst.simple_sccs
                 else:
                     break
             self.simple_finish = IrCond(self, cond, finp, finn)
@@ -328,13 +339,16 @@ class DecoBlock:
             self.simple_finish.arg_vals = self.finish.arg_vals
         self.simple_sccs = []
         def emit_scc(scc):
-            if len(scc.nodes) == 1 and scc.nodes[0] in substs:
-                for sub_scc in substs[scc.nodes[0]]:
-                    emit_scc(sub_scc)
+            if scc in substs:
+                for node in scc.nodes:
+                    for sub_scc in node.simple_sccs:
+                        emit_scc(sub_scc)
             else:
                 self.simple_sccs.append(scc)
         for scc in self.child_sccs:
             emit_scc(scc)
+        if self.debug:
+            print('END SIMPLIFY {}'.format(self))
 
 
     def compute_clean_phis(self):
@@ -631,6 +645,11 @@ class DecoTreeScc:
             for dst in node.front:
                 if dst not in self.front and dst not in self.nodes:
                     self.front.append(dst)
+
+    def __str__(self):
+        return 'scc_{}'.format(', '.join(str(x) for x in self.nodes))
+
+    __repr__ = __str__
 
 
 class DecoLoop:
