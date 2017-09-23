@@ -271,6 +271,7 @@ class DecoBlock:
         if self.debug:
             print('SIMPLIFY {}'.format(self))
         self.simple_finish = self.finish
+        self.simple_skipped = False
         substs = set()
         all_sccs = set(self.child_sccs)
         def xlat_goto(goto):
@@ -282,9 +283,16 @@ class DecoBlock:
             return goto
         def same_goto(fa, fb):
             return fa.dst == fb.dst and fa.phi_vals == fb.phi_vals
+        def single_in(block):
+            count = 0
+            for fin in block.ins:
+                if not fin.block.simple_skipped:
+                    count += 1
+            assert count > 0
+            return count == 1
         if isinstance(self.finish, IrGoto):
             dst = self.finish.dst
-            if self.children == [dst] and not dst.ops and not self.finish.phi_vals and len(dst.ins) == 1:
+            if self.children == [dst] and not dst.ops and not self.finish.phi_vals and single_in(dst):
                 self.simple_finish = dst.simple_finish
                 all_sccs |= set(dst.simple_sccs)
                 substs.add(dst.scc)
@@ -293,10 +301,11 @@ class DecoBlock:
             finp = xlat_goto(self.finish.finp)
             finn = xlat_goto(self.finish.finn)
             while True:
-                if finp.dst.scc in all_sccs and not finp.dst.ops and not finp.phi_vals and len(finp.dst.ins) == 1 and isinstance(finp.dst.simple_finish, IrCond):
+                if finp.dst.scc in all_sccs and not finp.dst.ops and not finp.phi_vals and single_in(finp.dst) and isinstance(finp.dst.simple_finish, IrCond):
                     if same_goto(finn, finp.dst.simple_finish.finn):
                         cond = self.make_expr(IrAnd, cond, finp.dst.simple_finish.cond)
                         all_sccs |= set(finp.dst.simple_sccs)
+                        finp.dst.simple_skipped = True
                         substs.add(finp.dst.scc)
                         finp = finp.dst.simple_finish.finp
                     elif same_goto(finn, finp.dst.simple_finish.finp):
@@ -304,14 +313,16 @@ class DecoBlock:
                             self.make_expr(IrXor, finp.dst.simple_finish.cond, IrConst(1, 1)),
                         )
                         all_sccs |= set(finp.dst.simple_sccs)
+                        finp.dst.simple_skipped = True
                         substs.add(finp.dst.scc)
                         finp = finp.dst.simple_finish.finn
                     else:
                         break
-                elif finn.dst.scc in all_sccs and not finn.dst.ops and not finn.phi_vals and len(finn.dst.ins) == 1 and isinstance(finn.dst.simple_finish, IrCond):
+                elif finn.dst.scc in all_sccs and not finn.dst.ops and not finn.phi_vals and single_in(finn.dst) and isinstance(finn.dst.simple_finish, IrCond):
                     if same_goto(finp, finn.dst.simple_finish.finp):
                         cond = self.make_expr(IrOr, cond, finn.dst.simple_finish.cond)
                         all_sccs |= set(finn.dst.simple_sccs)
+                        finn.dst.simple_skipped = True
                         substs.add(finn.dst.scc)
                         finn = finn.dst.simple_finish.finn
                     elif same_goto(finp, finn.dst.simple_finish.finn):
@@ -319,6 +330,7 @@ class DecoBlock:
                             self.make_expr(IrXor, finn.dst.simple_finish.cond, IrConst(1, 1)),
                         )
                         all_sccs |= set(finn.dst.simple_sccs)
+                        finn.dst.simple_skipped = True
                         substs.add(finn.dst.scc)
                         finn = finp.dst.simple_finish.finp
                     else:
