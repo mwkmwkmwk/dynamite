@@ -82,6 +82,11 @@ with open(args.file) as f:
                     raise ValueError('nossa command needs 2 arguments')
                 off = int(p[2], 16)
                 last_func.root.forbidden_stack_slots.add(off & 0xffffffff)
+            elif cmd == 'arg':
+                if len(p) != 3:
+                    raise ValueError('arg command needs 2 arguments')
+                reg = isa.regs[p[1]]
+                last_func.root.make_arg(reg, p[2])
             else:
                 raise ValueError('Unknown command "{}"'.format(cmd))
 

@@ -1843,5 +1843,11 @@ class FalconIsa(Isa):
 
     pc_width = 32
 
+    # XXX think of something better
+    regs = {
+        reg.name: reg
+        for reg in FalconArch.regs_r
+    }
+
 # Somebody's out to break you
 # Hiding in narrows - poison arrows

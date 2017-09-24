@@ -433,12 +433,13 @@ class MachineBlock(MachineBaseBlock):
         self.stack_slots[args] = res
         return res
 
-    def make_arg(self, loc):
+    def make_arg(self, loc, name=None):
         assert self.parent is None
         assert isinstance(loc, (BaseRegister, StackSlot))
         if loc in self.arg_cache:
             return self.arg_cache[loc]
-        name = 'arg_{}'.format(loc.name)
+        if name is None:
+            name = 'arg_{}'.format(loc.name)
         res = IrParam(self, name, loc.width, loc)
         self.arg_cache[loc] = res
         self.args.append(res)
