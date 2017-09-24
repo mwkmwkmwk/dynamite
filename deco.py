@@ -215,5 +215,11 @@ if args.print_domtree:
 
 for tree in forest.trees:
     s = StructFunc(tree)
-    print('// Function at {:x}'.format(s.tree.root.pos))
+    print('// Function at {:#x}.'.format(s.tree.root.pos))
+    if s.tree.root.stack_slots:
+        print('// Stack slots: {}.'.format(
+            ', '.join(
+                str(slot) for slot in s.tree.root.stack_slots.values()
+            )
+        ))
     print(s.str(''))
