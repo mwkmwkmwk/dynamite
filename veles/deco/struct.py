@@ -231,8 +231,7 @@ class StmtJump:
         self.finish = finish
 
     def str(self, func, indent):
-        # XXX
-        return 'jump\n'
+        return '{}goto *{};\n'.format(indent, func.str_expr(self.finish.addr, 0)[0])
 
 
 class StmtIf:

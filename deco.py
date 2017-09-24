@@ -34,6 +34,7 @@ forest = DecoForest(debug=args.debug)
 
 data = None
 base = None
+last_func = None
 
 isa = FalconIsa()
 
@@ -75,6 +76,12 @@ with open(args.file) as f:
                     fun_name = None
                 fun = forest.mark_function(forest.mark_block(MachineBlock, segment, fun_start))
                 fun.set_name(fun_name)
+                last_func = fun
+            elif cmd == 'nossa':
+                if len(p) != 3:
+                    raise ValueError('nossa command needs 2 arguments')
+                off = int(p[2], 16)
+                last_func.root.forbidden_stack_slots.add(off & 0xffffffff)
             else:
                 raise ValueError('Unknown command "{}"'.format(cmd))
 
