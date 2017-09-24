@@ -1,4 +1,4 @@
-from .forest import DecoBlock, DecoReturn
+from .forest import DecoBlock, DecoReturn, DecoResult
 from .ir import (
     IrConst,
     IrParam, IrPhi, IrCallRes,
@@ -101,7 +101,7 @@ class Translator:
         elif isinstance(reg, RegisterSplit):
             parts = []
             bits = 0
-            for start, sub in reg.parts:
+            for start, width, sub in reg.parts:
                 if start != bits:
                     assert start > bits
                     parts.append(IrConst(start - bits, 0))
@@ -141,7 +141,7 @@ class Translator:
                 self.nextpc = val
             self.halted = True
         elif isinstance(reg, RegisterSplit):
-            for start, sub in reg.parts:
+            for start, width, sub in reg.parts:
                 self.write_reg(cond, sub, self.block.make_expr(IrExtr, val, start, sub.width))
         elif isinstance(reg, SubRegister):
             ov = self.read_reg(reg.parent)
@@ -225,8 +225,15 @@ class Translator:
                     for part in expr.vals
                 ]
             )
+        elif isinstance(expr, SemaSlct):
+            return self.block.make_expr(
+                IrSlct,
+                self.xlat_sema_expr(expr.cond, vstate),
+                self.xlat_sema_expr(expr.va, vstate),
+                self.xlat_sema_expr(expr.vb, vstate),
+            )
         else:
-            print(expr)
+            print(type(expr))
             raise NotImplementedError
 
     def xlat_sema_op(self, op, cond, vstate):
@@ -308,7 +315,11 @@ class MachineReturn(DecoReturn):
     def __init__(self, tree, addr, reg_clobber, stack_offset):
         super().__init__(tree)
         self.addr = addr
-        self.reg_clobber = reg_clobber
+        self.results_cache = {
+            loc: DecoResult(self, 'res_{}'.format(loc.name), loc.width, loc)
+            for loc in reg_clobber
+        }
+        self.results = list(self.results_cache.values())
         self.stack_offset = stack_offset
         self.name = 'retpath_{}'.format(addr.name)
 
@@ -327,17 +338,16 @@ class MachineReturn(DecoReturn):
                 self.stack_offset[loc] = None
                 changed = True
         for reg in reg_clobber:
-            if reg not in self.reg_clobber:
+            if reg not in self.results_cache:
                 changed = True
-                self.reg_clobber.add(reg)
+                res = DecoResult(self, 'res_{}'.format(reg.name), reg.width, reg)
+                self.results_cache[reg] = res
+                self.results.append(res)
         if changed:
             self.invalidate()
 
     def invalidate(self):
         self.tree.invalidate_callers()
-
-    def res_locs(self):
-        return self.reg_clobber
 
 
 class MachineBaseBlock(DecoBlock):
@@ -496,14 +506,15 @@ class MachineEndBlock(MachineBaseBlock):
             if (block.tree == self.tree and block != self.tree.root) or block.tree is None:
                 self.finish = IrGoto(self, block, self.regstate_in)
             else:
+                self.forest.mark_function(block)
                 returns = {}
                 for path in block.tree.root.ret_paths:
                     regstate = dict(self.regstate_in)
                     results = []
-                    for loc in path.reg_clobber:
-                        res = IrCallRes(self, 'res_{:x}_{}_{}'.format(self.pos, block.tree.get_name(), loc), loc.width, path, loc)
-                        results.append(res)
-                        regstate[loc] = res
+                    for res in path.results:
+                        cres = IrCallRes(self, 'cres_{:x}_{}_{}'.format(self.pos, block.tree.get_name(), res), res.width, path, res)
+                        results.append(cres)
+                        regstate[res.loc] = cres
                     for loc, off in path.stack_offset.items():
                         if loc in self.regstate_in:
                             val = self.regstate_in[loc]
@@ -579,8 +590,8 @@ class MachineEndBlock(MachineBaseBlock):
                 self.forest.mark_function(new_root)
             self.finish = IrJump(self, self.target, self.regstate_in)
 
-    def get_passed_res(self, loc):
-        return self.get_passed_phi(self.finish, loc)
+    def get_passed_res(self, res):
+        return self.get_passed_phi(self.finish, res.loc)
 
     def get_passed_arg(self, arg):
         loc = arg.loc

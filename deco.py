@@ -19,7 +19,8 @@ import argparse
 parser = argparse.ArgumentParser(description='Decompile a list of functions.')
 parser.add_argument('file', help='the input file')
 parser.add_argument('-a', '--print-assembly', action='store_true', help='print the assembly insns')
-parser.add_argument('-d', '--debug', action='store_true', help='print tree construction debug')
+parser.add_argument('-d', '--print-domtree', action='store_true', help='print dominator tree and complete register state')
+parser.add_argument('-D', '--debug', action='store_true', help='print tree construction debug')
 args = parser.parse_args()
 
 from veles.data.bindata import BinData
@@ -27,6 +28,7 @@ from veles.dis.isa.falcon import FalconIsa
 from veles.deco.forest import DecoForest
 from veles.deco.machine import MachineSegment, MachineBlock, MachineReturn
 from veles.deco.ir import IrGoto, IrCond, IrJump, IrCall, IrReturn, IrHalt
+from veles.deco.struct import StructFunc
 
 forest = DecoForest(debug=args.debug)
 
@@ -186,14 +188,20 @@ def print_bb(indent, block):
                     print_bb(indent + 2, node)
 
 
+if args.print_domtree:
+    for tree in forest.trees:
+        print('Function {}:'.format(tree.get_name()))
+        for path in tree.root.ret_paths:
+            print('    Return path {}'.format(path))
+            if isinstance(path, MachineReturn):
+                print('        Clobber {}'.format(path.reg_clobber))
+                print('        Stack offsets {}'.format(path.stack_offset))
+        for arg in tree.root.args:
+            mask = forest.live_masks.get(arg, 0)
+            print('    [{:x}] {} = {}'.format(mask, arg, arg.loc))
+        print_bb(1, tree.root)
+
 for tree in forest.trees:
-    print('Function {}:'.format(tree.get_name()))
-    for path in tree.root.ret_paths:
-        print('    Return path {}'.format(path))
-        if isinstance(path, MachineReturn):
-            print('        Clobber {}'.format(path.reg_clobber))
-            print('        Stack offsets {}'.format(path.stack_offset))
-    for arg in tree.root.args:
-        mask = forest.live_masks.get(arg, 0)
-        print('    [{:x}] {} = {}'.format(mask, arg, arg.loc))
-    print_bb(1, tree.root)
+    s = StructFunc(tree)
+    print('// Function at {:x}'.format(s.tree.root.pos))
+    print(s.str(''))

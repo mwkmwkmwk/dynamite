@@ -47,7 +47,7 @@ class IrConst(IrVal):
     def __str__(self):
         return 'uint{}_t(0x{:x})'.format(self.width, self.val)
 
-    def cuts(self):
+    def const_cuts(self):
         return const_cuts(self.width, self.val)
 
 
@@ -69,10 +69,10 @@ class IrParam(IrVar):
 
 
 class IrCallRes(IrVar):
-    def __init__(self, block, name, width, ret_path, loc):
+    def __init__(self, block, name, width, ret_path, res):
         super().__init__(block, name, width)
         self.ret_path = ret_path
-        self.loc = loc
+        self.res = res
 
 
 class IrPhi(IrVar):
@@ -159,6 +159,8 @@ class IrBinUni(IrBin):
 
 class IrAdd(IrBinUni):
     etype = 'ADD'
+    lvl = 7
+    symbol = '+'
 
     commutative = True
     associative = True
@@ -186,6 +188,8 @@ class IrAdd(IrBinUni):
 
 class IrSub(IrBinUni):
     etype = 'SUB'
+    lvl = 7
+    symbol = '-'
 
     def live_ins(self, mask):
         in_mask = lo_mask(mask)
@@ -213,6 +217,8 @@ class IrSub(IrBinUni):
 
 class IrMul(IrBinUni):
     etype = 'MUL'
+    lvl = 8
+    symbol = '*'
 
     commutative = True
     associative = True
@@ -238,6 +244,8 @@ class IrMul(IrBinUni):
 
 class IrUDiv(IrBinUni):
     etype = 'UDIV'
+    lvl = 8
+    symbol = '/'
 
     @classmethod
     def fold_const(cls, block, width, a, b):
@@ -247,10 +255,14 @@ class IrUDiv(IrBinUni):
 
 class IrSDiv(IrBinUni):
     etype = 'SDIV'
+    lvl = 8
+    symbol = '/.s'
 
 
 class IrUMod(IrBinUni):
     etype = 'UMOD'
+    lvl = 8
+    symbol = '%'
 
     @classmethod
     def fold_const(cls, block, width, a, b):
@@ -262,6 +274,8 @@ class IrUMod(IrBinUni):
 
 class IrSMod(IrBinUni):
     etype = 'SMOD'
+    lvl = 8
+    symbol = '%.s'
 
 
 class IrBitwise(IrBinUni):
@@ -287,6 +301,8 @@ class IrBitwise(IrBinUni):
 
 class IrAnd(IrBitwise):
     etype = 'AND'
+    lvl = 1
+    symbol = '&'
 
     @classmethod
     def fold_const(cls, block, width, a, b):
@@ -308,9 +324,45 @@ class IrAnd(IrBitwise):
     def fold_same(cls, block, va):
         return va
 
+    @classmethod
+    def fold_ugt(cls, block, va, vb):
+        if not isinstance(va, IrXor):
+            return
+        if va.vb != IrConst(1, 1):
+            return
+        if not isinstance(va.va, IrUlt):
+            return
+        exp_vb = block.make_expr(
+            IrXor,
+            block.make_expr(
+                IrEq,
+                va.va.va,
+                va.va.vb,
+            ),
+            IrConst(1, 1),
+        )
+        if vb != exp_vb:
+            return
+        return block.make_expr(
+            IrUlt,
+            va.va.vb,
+            va.va.va,
+        )
+
+    @classmethod
+    def fold_other(cls, block, va, vb):
+        res = cls.fold_ugt(block, va, vb)
+        if res is not None:
+            return res
+        res = cls.fold_ugt(block, vb, va)
+        if res is not None:
+            return res
+
 
 class IrOr(IrBitwise):
     etype = 'OR'
+    lvl = 3
+    symbol = '|'
 
     @classmethod
     def fold_const(cls, block, width, a, b):
@@ -335,6 +387,8 @@ class IrOr(IrBitwise):
 
 class IrXor(IrBitwise):
     etype = 'XOR'
+    lvl = 2
+    symbol = '^'
 
     @classmethod
     def fold_const(cls, block, width, a, b):
@@ -357,6 +411,8 @@ class IrBinLeft(IrBin):
 
 class IrShl(IrBinLeft):
     etype = 'SHL'
+    lvl = 6
+    symbol = '<<'
 
     @classmethod
     def fold_const_right(cls, block, va, b):
@@ -373,6 +429,8 @@ class IrShl(IrBinLeft):
 
 class IrShr(IrBinLeft):
     etype = 'SHR'
+    lvl = 6
+    symbol = '>>'
 
     @classmethod
     def fold_const_right(cls, block, va, b):
@@ -389,6 +447,8 @@ class IrShr(IrBinLeft):
 
 class IrSar(IrBinLeft):
     etype = 'SAR'
+    lvl = 6
+    symbol = '>>.s'
 
     @classmethod
     def fold_const_right(cls, block, va, b):
@@ -411,6 +471,8 @@ class IrBinPred(IrBin):
 
 class IrEq(IrBinPred):
     etype = 'EQ'
+    lvl = 4
+    symbol = '=='
 
     commutative = True
 
@@ -443,6 +505,8 @@ class IrEq(IrBinPred):
 
 class IrUlt(IrBinPred):
     etype = 'ULT'
+    lvl = 5
+    symbol = '<'
 
     @classmethod
     def fold_const(cls, block, width, a, b):
@@ -455,6 +519,8 @@ class IrUlt(IrBinPred):
 
 class IrSlt(IrBinPred):
     etype = 'SLT'
+    lvl = 5
+    symbol = '<.s'
 
     @classmethod
     def fold_const(cls, block, width, a, b):
@@ -522,6 +588,87 @@ class IrCF(IrExpr):
         return '{} = CF({}, {}, {})'.format(self.name, self.va, self.vb, self.vc)
 
     @classmethod
+    def fold_ult(cls, block, va, vb, vc):
+        if not isinstance(vc, IrExtr):
+            return
+        width = vc.pos + 1
+        if not isinstance(vc.va, IrSub):
+            return
+        exp_va = block.make_expr(IrExtr, vc.va.va, vc.pos, 1)
+        exp_vb = block.make_expr(
+            IrXor,
+            block.make_expr(IrExtr, vc.va.vb, vc.pos, 1),
+            IrConst(1, 1)
+        )
+        if va != exp_va:
+            return
+        if vb != exp_vb:
+            return
+        return block.make_expr(
+            IrXor,
+            block.make_expr(
+                IrUlt,
+                block.make_expr(
+                    IrExtr,
+                    vc.va.va,
+                    0,
+                    width
+                ),
+                block.make_expr(
+                    IrExtr,
+                    vc.va.vb,
+                    0,
+                    width
+                ),
+            ),
+            IrConst(1, 1),
+        )
+
+    @classmethod
+    def fold_ult_const(cls, block, va, vb, vc):
+        if not isinstance(vc, IrExtr):
+            return
+        width = vc.pos + 1
+        if not isinstance(vc.va, IrAdd):
+            return
+        if not isinstance(vc.va.vb, IrConst):
+            return
+        exp_va = block.make_expr(IrExtr, vc.va.va, vc.pos, 1)
+        neg_vb = block.make_expr(
+            IrSub,
+            IrConst(vc.va.vb.width, 0),
+            vc.va.vb
+        )
+        exp_vb = block.make_expr(
+            IrXor,
+            block.make_expr(IrExtr, neg_vb, vc.pos, 1),
+            IrConst(1, 1)
+        )
+        if va != exp_va:
+            return
+        if vb != exp_vb:
+            return
+        return block.make_expr(
+            IrXor,
+            block.make_expr(
+                IrUlt,
+                block.make_expr(
+                    IrExtr,
+                    vc.va.va,
+                    0,
+                    width
+                ),
+                block.make_expr(
+                    IrExtr,
+                    neg_vb,
+                    0,
+                    width
+                ),
+            ),
+            IrConst(1, 1),
+        )
+
+    @classmethod
     def fold(cls, block, va, vb, vc):
         if isinstance(va, IrConst) and isinstance(vb, IrConst) and isinstance(vc, IrConst):
             if va.val == 0 and vb.val == 0:
@@ -531,6 +678,12 @@ class IrCF(IrExpr):
             else:
                 res = vc.val ^ 1
             return IrConst(1, res)
+        res = cls.fold_ult(block, va, vb, vc)
+        if res is not None:
+            return res
+        res = cls.fold_ult_const(block, va, vb, vc)
+        if res is not None:
+            return res
 
 
 class IrOF(IrExpr):
@@ -557,6 +710,8 @@ class IrOF(IrExpr):
     def fold(cls, block, va, vb, vc):
         if isinstance(va, IrConst) and isinstance(vb, IrConst) and isinstance(vc, IrConst):
             return IrConst(1, int(va.val == vb.val and va.val != vc.val))
+        if va == vc or vb == vc:
+            return IrConst(1, 0)
 
 
 class IrConcat(IrExpr):

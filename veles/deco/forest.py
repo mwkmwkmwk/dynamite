@@ -276,7 +276,9 @@ class DecoBlock:
         all_sccs = set(self.child_sccs)
         def xlat_goto(goto):
             nonlocal all_sccs
-            if goto.dst in self.children and isinstance(goto.dst.simple_finish, IrGoto) and not goto.dst.ops and not goto.phi_vals:
+            if goto.dst.loop != goto.block.loop:
+                return goto
+            if goto.dst in self.children and isinstance(goto.dst.simple_finish, IrGoto) and not goto.dst.ops and not goto.phi_vals and not goto.dst.exprs:
                 substs.add(goto.dst.scc)
                 all_sccs |= set(goto.dst.simple_sccs)
                 return goto.dst.simple_finish
@@ -292,7 +294,7 @@ class DecoBlock:
             return count == 1
         if isinstance(self.finish, IrGoto):
             dst = self.finish.dst
-            if self.children == [dst] and not dst.ops and not self.finish.phi_vals and single_in(dst):
+            if self.children == [dst] and not dst.ops and not dst.exprs and not self.finish.phi_vals and single_in(dst):
                 self.simple_finish = dst.simple_finish
                 all_sccs |= set(dst.simple_sccs)
                 substs.add(dst.scc)
@@ -375,12 +377,12 @@ class DecoBlock:
                     self.finish.arg_vals[arg] = self.make_expr(IrAnd, val, IrConst(val.width, mask))
         elif isinstance(self.finish, IrReturn):
             self.finish.res_vals = {}
-            for loc in self.finish.path.res_locs():
-                mask = self.forest.live_rets.get((self.finish.path, loc), 0)
+            for res in self.finish.path.results:
+                mask = self.forest.live_rets.get(res, 0)
                 if mask == 0:
                     continue
-                val = self.get_passed_res(loc)
-                self.finish.res_vals[loc] = self.make_expr(IrAnd, val, IrConst(val.width, mask))
+                val = self.get_passed_res(res)
+                self.finish.res_vals[res] = self.make_expr(IrAnd, val, IrConst(val.width, mask))
         for fin in self.outs():
             fin.phi_vals = {}
             for phi in fin.dst.phis.values():
@@ -443,6 +445,17 @@ class DecoBlock:
 
     def __str__(self):
         return self.get_name()
+
+
+class DecoResult:
+    def __init__(self, path, name, width, loc):
+        self.path = path
+        self.name = name
+        self.width = width
+        self.loc = loc
+
+    def __str__(self):
+        return self.name
 
 
 class DecoReturn:
@@ -620,13 +633,12 @@ class DecoForest:
                         cval = fin.block.get_passed_phi(fin, val.loc)
                         live_queue.append((cval, mask))
                 elif isinstance(val, IrCallRes):
-                    key = val.ret_path, val.loc
-                    cur_mask = self.live_rets.get(key, 0)
+                    cur_mask = self.live_rets.get(val.res, 0)
                     new_mask = cur_mask | mask
                     if cur_mask != new_mask:
-                        self.live_rets[key] = new_mask
+                        self.live_rets[val.res] = new_mask
                         for block in val.ret_path.blocks:
-                            cval = block.get_passed_res(val.loc)
+                            cval = block.get_passed_res(val.res)
                             live_queue.append((cval, mask))
                 elif isinstance(val, IrExpr):
                     for cval, cmask in val.live_ins(mask):
