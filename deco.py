@@ -131,7 +131,7 @@ def print_finish(indent, finish):
             ret, = finish.returns.values()
             for res in ret.results:
                 mask = forest.live_masks.get(res, 0)
-                print('{}[{:x}] {} = {}'.format(ind, mask, res, res.loc))
+                print('{}[{:x}] {} = {}'.format(ind, mask, res, res.res))
             print_finish(indent, ret.finish)
         else:
             print('{}{}() ->'.format(ind, finish.tree.get_name()))
@@ -206,7 +206,7 @@ if args.print_domtree:
         for path in tree.root.ret_paths:
             print('    Return path {}'.format(path))
             if isinstance(path, MachineReturn):
-                print('        Clobber {}'.format(path.reg_clobber))
+                print('        Results {}'.format(path.results))
                 print('        Stack offsets {}'.format(path.stack_offset))
         for arg in tree.root.args:
             mask = forest.live_masks.get(arg, 0)
