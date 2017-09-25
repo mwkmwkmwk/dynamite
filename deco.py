@@ -206,7 +206,7 @@ if args.print_domtree:
         for path in tree.root.ret_paths:
             print('    Return path {}'.format(path))
             if isinstance(path, MachineReturn):
-                print('        Results {}'.format(path.results))
+                print('        Results {}'.format(', '.join(str(x) for x in path.results)))
                 print('        Stack offsets {}'.format(path.stack_offset))
         for arg in tree.root.args:
             mask = forest.live_masks.get(arg, 0)
