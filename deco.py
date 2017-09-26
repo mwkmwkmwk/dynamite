@@ -26,7 +26,7 @@ args = parser.parse_args()
 from veles.data.bindata import BinData
 from veles.dis.isa.falcon import FalconIsa
 from veles.deco.forest import DecoForest
-from veles.deco.machine import MachineSegment, MachineBlock, MachineReturn
+from veles.deco.machine import MachineSegment, MachineBlock, MachineBaseBlock, MachineReturn
 from veles.deco.ir import IrGoto, IrCond, IrJump, IrCall, IrReturn, IrHalt
 from veles.deco.struct import StructFunc
 
@@ -175,6 +175,9 @@ def print_bb(indent, block):
                 for insn in block.raw_insns:
                     print('{}{:08x} {:18} {}'.format(ind, insn.start, ' '.join(format(x, '02x') for x in data[insn.start:insn.end]), (' '*28 + '\n').join(str(x) for x in insn.insns)))
                 print()
+        if isinstance(block, MachineBaseBlock):
+            for loc, val in block.regstate_in.items():
+                print('{}    [{} = {}]'.format(ind, loc, val))
         for loc, phi in block.phis.items():
             mask = forest.live_masks.get(phi, 0)
             print('{}[{:x}] {} = {}'.format(ind, mask, phi, loc))
