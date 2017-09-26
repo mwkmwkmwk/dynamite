@@ -437,9 +437,14 @@ class DecoBlock:
             weight += 1
         for expr in reversed(self.exprs):
             if self.expr_counts[expr]:
-                for val, mask in expr.live_ins(-1):
-                    bump_count(val)
-                    weight += 1
+                if isinstance(expr, IrConcat):
+                    for cpart in expr.cparts:
+                        bump_count(cpart.va)
+                        weight += 1
+                else:
+                    for val, mask in expr.live_ins(-1):
+                        bump_count(val)
+                        weight += 1
                 weight += 1
         self.weight = weight
 

@@ -520,22 +520,60 @@ class StructFunc:
                     sa, expr.symbol, sb,
                 ), ta + tb
             elif isinstance(expr, IrConcat):
+                if lvl > 3:
+                    s, t = self.str_expr(expr, 0, force)
+                    return '({})'.format(s), t
                 parts = []
                 things = []
-                for part in expr.parts:
-                    if isinstance(part, IrConst):
-                        parts.append('(uint{}_t){:#x}'.format(part.width, part.val))
+                for part in expr.cparts:
+                    if part.sext is None:
+                        if part.shift < 0:
+                            p, t = self.str_expr(part.va, 6)
+                            if part.va.width != expr.width:
+                                sp = '(uint{}_t)({} >> {})'.format(expr.width, p, -part.shift)
+                            else:
+                                sp = '{} >> {}'.format(p, -part.shift)
+                        elif part.shift == 0:
+                            if part.va.width != expr.width:
+                                p, t = self.str_expr(part.va, 9)
+                                sp = '(uint{}_t){}'.format(expr.width, p)
+                            else:
+                                sp, t = self.str_expr(part.va, 4)
+                        else:
+                            if part.va.width != expr.width:
+                                p, t = self.str_expr(part.va, 9)
+                                sp = '(uint{}_t){} << {}'.format(expr.width, p, part.shift)
+                            else:
+                                p, t = self.str_expr(part.va, 6)
+                                sp = '{} << {}'.format(p, part.shift)
                     else:
-                        p, t = self.str_expr(part, 0)
-                        parts.append(p)
-                        things += t
-                return 'CONCAT({})'.format(', '.join(parts)), things
+                        if part.shift < 0:
+                            p, t = self.str_expr(part.va, 6)
+                            sp = '(uint{}_t)((int{}_t){} >> {})'.format(expr.width, part.sext, p, -part.shift)
+                        elif part.shift == 0:
+                            p, t = self.str_expr(part.va, 9)
+                            sp = '(uint{}_t)(int{}_t){}'.format(expr.width, part.sext, p)
+                        else:
+                            p, t = self.str_expr(part.va, 9)
+                            sp = '(uint{}_t)(int{}_t){} << {}'.format(expr.width, part.sext, p, part.shift)
+                    if part.mask is None:
+                        parts.append(sp)
+                    else:
+                        parts.append('{} & {:#x}'.format(sp, part.mask))
+                    things += t
+                if expr.cpart_const:
+                    parts.append(hex(expr.cpart_const))
+                return ' | '.join(parts), things
             elif isinstance(expr, IrExtr):
-                s, t = self.str_expr(expr.va, 0)
-                return 'EXTR({}, {}, {})'.format(s, expr.pos, expr.width), t
+                if expr.pos == 0:
+                    s, t = self.str_expr(expr.va, 9)
+                    return '(uint{}_t){}'.format(expr.width, s), t
+                else:
+                    s, t = self.str_expr(expr.va, 6)
+                    return '(uint{}_t)({} >> {})'.format(expr.width, s, expr.pos), t
             elif isinstance(expr, IrSext):
-                s, t = self.str_expr(expr.va, 0)
-                return 'SEXT({}, {})'.format(s, expr.width), t
+                s, t = self.str_expr(expr.va, 9)
+                return '(uint{}_t)(int{}_t){}'.format(expr.width, expr.va.width, s), t
             elif isinstance(expr, IrCF):
                 sa, ta = self.str_expr(expr.va, 0)
                 sb, tb = self.str_expr(expr.vb, 0)

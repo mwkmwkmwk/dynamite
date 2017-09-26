@@ -714,12 +714,61 @@ class IrOF(IrExpr):
             return IrConst(1, 0)
 
 
+class CPart:
+    def __init__(self, va, shift, mask, sext=None):
+        self.va = va
+        self.shift = shift
+        self.mask = mask
+        self.sext = sext
+
+
 class IrConcat(IrExpr):
     etype = 'CONCAT'
 
     def __init__(self, block, name, *parts):
         super().__init__(block, name, sum(part.width for part in parts))
         self.parts = parts
+        self.cparts = []
+        self.cpart_const = 0
+        pos = 0
+        cpart_cache = {}
+        for part in parts:
+            if isinstance(part, IrConst):
+                self.cpart_const |= part.val << pos
+            else:
+                mask = ((1 << part.width) - 1) << pos
+                sext = None
+                val = part
+                if isinstance(val, IrSext):
+                    val = val.va
+                    sext = val.width
+                if isinstance(val, IrExtr):
+                    shift = pos - val.pos
+                    if sext is not None:
+                        sext += val.pos
+                    val = val.va
+                else:
+                    shift = pos
+                if (val, shift) in cpart_cache:
+                    cpart = cpart_cache[val, shift]
+                    cpart.mask |= mask
+                    if sext is not None:
+                        cpart.sext = sext
+                        del cpart_cache[val, shift]
+                else:
+                    cpart = CPart(val, shift, mask, sext)
+                    self.cparts.append(cpart)
+                    if sext is None:
+                        cpart_cache[val, shift] = cpart
+            pos += part.width
+        for cpart in self.cparts:
+            max_mask = ((1 << self.width) - 1)
+            if cpart.shift > 0:
+                max_mask &= max_mask << cpart.shift
+            else:
+                max_mask >>= -cpart.shift
+            if ((cpart.mask | self.cpart_const) & max_mask) == max_mask:
+                cpart.mask = None
 
     def live_ins(self, mask):
         pos = 0
