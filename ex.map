@@ -1,0 +1,13 @@
+file ex.bin
+func 0 start
+func 7 start_post_sp
+func c read_reg
+arg r10 reg
+arg r11 pval
+func 14 write_reg
+arg r10 reg
+arg r11 val
+func 19 wait_for_idle
+nossa sp -8
+func 41 main
+nossa sp -8

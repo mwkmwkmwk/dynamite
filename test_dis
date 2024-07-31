@@ -1,0 +1,21 @@
+#!/usr/bin/env python3
+
+import sys
+from pprint import pprint
+
+from chuj.data.bindata import BinData
+from chuj.dis.isa.falcon import FalconIsa
+from chuj.dis.sema import SemaVar
+
+data = []
+for x in sys.argv[1:]:
+    data.append(int(x, 16))
+
+pos = 0
+while pos < len(data):
+    base = SemaVar(32, 'aaa')
+    res = FalconIsa().parse(BinData(8, data), 0, base, pos)
+    # pprint(res.__dict__)
+    print('{:08x} {:18} {}'.format(pos, ' '.join(format(x, '02x') for x in data[pos:pos+res.len]), (' '*28 + '\n').join(str(x) for x in res.insns)))
+    pos += res.len
+    print(res.sema.str(0))
